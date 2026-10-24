@@ -6,7 +6,8 @@ export function createNeonTenantStore(databaseUrl: string): TenantStore {
   return {
     async getByLocationId(locationId) {
       const rows = await sql`
-        SELECT location_id, name, api_key_encrypted, timezone, currency, m10_workflow_id, active
+        SELECT location_id, name, api_key_encrypted, timezone, currency, m10_workflow_id,
+               webhook_token_hash, active
         FROM tenants
         WHERE location_id = ${locationId}
         LIMIT 1
@@ -16,7 +17,8 @@ export function createNeonTenantStore(databaseUrl: string): TenantStore {
     },
     async listActive() {
       const rows = await sql`
-        SELECT location_id, name, api_key_encrypted, timezone, currency, m10_workflow_id, active
+        SELECT location_id, name, api_key_encrypted, timezone, currency, m10_workflow_id,
+               webhook_token_hash, active
         FROM tenants
         WHERE active = TRUE
         ORDER BY location_id
@@ -32,6 +34,7 @@ export function createNeonTenantStore(databaseUrl: string): TenantStore {
           timezone,
           currency,
           m10_workflow_id,
+          webhook_token_hash,
           active,
           updated_at
         ) VALUES (
@@ -41,6 +44,7 @@ export function createNeonTenantStore(databaseUrl: string): TenantStore {
           ${tenant.timezone},
           ${tenant.currency},
           ${tenant.m10WorkflowId},
+          ${tenant.webhookTokenHash},
           ${tenant.active},
           NOW()
         )
@@ -50,6 +54,7 @@ export function createNeonTenantStore(databaseUrl: string): TenantStore {
           timezone = EXCLUDED.timezone,
           currency = EXCLUDED.currency,
           m10_workflow_id = EXCLUDED.m10_workflow_id,
+          webhook_token_hash = EXCLUDED.webhook_token_hash,
           active = EXCLUDED.active,
           updated_at = NOW()
       `;
@@ -81,6 +86,7 @@ export function mapTenantRow(row: unknown): Tenant {
     timezone,
     currency,
     m10WorkflowId: asString(record.m10_workflow_id),
+    webhookTokenHash: asString(record.webhook_token_hash),
     active: record.active === true || record.active === "t" || record.active === "true",
   };
 }

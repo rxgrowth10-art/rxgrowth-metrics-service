@@ -1,5 +1,5 @@
 import { GhlRequestError } from "./errors";
-import { parseContact, parseContactPage, parseCustomFields, parseOrderPage } from "./parse";
+import { parseContact, parseContactPage, parseCustomFields, parseOrderPage, parseOrderResource } from "./parse";
 import { type Clock, LocationRateLimiter, sharedLimiter, systemClock } from "./rate-limit";
 import type { CustomFieldWrite, GhlClient, GhlContact, GhlCustomField, GhlOrder } from "./types";
 
@@ -17,6 +17,8 @@ export interface GhlClientOptions {
   maxRetries?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
+  /** 0..1 source for retry jitter. Tests pass a constant. */
+  random?: () => number;
   minIntervalMs?: number;
   pageSize?: number;
   contactPageSize?: number;
@@ -32,7 +34,8 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
   const timeoutMs = options.timeoutMs ?? 4000;
   const maxRetries = options.maxRetries ?? 2;
   const baseDelayMs = options.baseDelayMs ?? 100;
-  const maxDelayMs = options.maxDelayMs ?? 1000;
+  const maxDelayMs = options.maxDelayMs ?? 20_000;
+  const random = options.random ?? Math.random;
   const pageSize = options.pageSize ?? ORDER_PAGE_SIZE;
   const contactPageSize = options.contactPageSize ?? CONTACT_PAGE_SIZE;
   const maxOrderPages = options.maxOrderPages ?? 100;
@@ -47,10 +50,11 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
   async function requestJson(
     method: string,
     path: string,
-    init: { query?: Record<string, string | number>; body?: unknown } = {},
+    init: { query?: Record<string, string | number>; body?: unknown; retry?: boolean } = {},
   ): Promise<unknown> {
     const url = buildUrl(baseUrl, path, init.query);
-    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const retries = init.retry === false ? 0 : maxRetries;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
       await limiter.wait(locationId);
       const timed = timeoutSignal(timeoutMs);
       let response: Response;
@@ -68,10 +72,10 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
         });
       } catch {
         timed.cancel();
-        if (attempt === maxRetries) {
+        if (attempt === retries) {
           throw new GhlRequestError("GHL request failed", 0, path);
         }
-        await clock.sleep(backoff(attempt, baseDelayMs, maxDelayMs));
+        await clock.sleep(backoff(attempt, baseDelayMs, maxDelayMs, random));
         continue;
       }
       timed.cancel();
@@ -85,8 +89,8 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
           throw new GhlRequestError("GHL response was not JSON", response.status, path);
         }
       }
-      if (isRetryable(response.status) && attempt < maxRetries) {
-        await clock.sleep(retryDelay(response, attempt, clock, baseDelayMs, maxDelayMs));
+      if (isRetryable(response.status) && attempt < retries) {
+        await clock.sleep(retryDelay(response, attempt, clock, baseDelayMs, maxDelayMs, random));
         continue;
       }
       throw new GhlRequestError(`GHL request failed with status ${response.status}`, response.status, path);
@@ -138,7 +142,14 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
       if (!reachedEnd) {
         throw new GhlRequestError("Order pagination exceeded the page cap", 0, "/payments/orders");
       }
-      return orders;
+      return orders.filter((order) => order.contactId === null || order.contactId === contactId);
+    },
+
+    async getOrder(orderId: string): Promise<GhlOrder | null> {
+      const body = await requestJson("GET", `/payments/orders/${encodeURIComponent(orderId)}`, {
+        query: { altId: locationId, altType: "location", locationId },
+      });
+      return parseOrderResource(body);
     },
 
     async getContact(contactId: string): Promise<GhlContact> {
@@ -197,7 +208,7 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
       await requestJson(
         "POST",
         `/contacts/${encodeURIComponent(contactId)}/workflow/${encodeURIComponent(workflowId)}`,
-        { body: eventStartTime ? { eventStartTime } : {} },
+        { body: eventStartTime ? { eventStartTime } : {}, retry: false },
       );
     },
   };
@@ -217,8 +228,12 @@ function isRetryable(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
-function backoff(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
-  return Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
+const RETRY_AFTER_CAP_MS = 60_000;
+
+function backoff(attempt: number, baseDelayMs: number, maxDelayMs: number, random: () => number): number {
+  const exponential = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
+  const unit = Math.min(1, Math.max(0, random()));
+  return Math.round(exponential * (0.5 + unit * 0.5));
 }
 
 function retryDelay(
@@ -227,17 +242,18 @@ function retryDelay(
   clock: Clock,
   baseDelayMs: number,
   maxDelayMs: number,
+  random: () => number,
 ): number {
   const header = response.headers.get("retry-after");
   if (header) {
     const seconds = Number(header);
     if (Number.isFinite(seconds) && seconds >= 0) {
-      return Math.min(maxDelayMs, Math.round(seconds * 1000));
+      return Math.min(RETRY_AFTER_CAP_MS, Math.round(seconds * 1000));
     }
     const date = Date.parse(header);
-    if (!Number.isNaN(date)) return Math.min(maxDelayMs, Math.max(0, date - clock.now()));
+    if (!Number.isNaN(date)) return Math.min(RETRY_AFTER_CAP_MS, Math.max(0, date - clock.now()));
   }
-  return backoff(attempt, baseDelayMs, maxDelayMs);
+  return backoff(attempt, baseDelayMs, maxDelayMs, random);
 }
 
 function timeoutSignal(ms: number): { signal: AbortSignal; cancel: () => void } {

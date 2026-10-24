@@ -9,6 +9,7 @@ interface TenantInput {
   timezone: string;
   currency: string;
   m10WorkflowId: string | null;
+  webhookTokenHash: string | null;
   active: boolean;
 }
 
@@ -48,6 +49,7 @@ export function readTenantInput(env: NodeJS.ProcessEnv): TenantInput {
     timezone: optionalText(env.TENANT_TIMEZONE) ?? "UTC",
     currency: optionalText(env.TENANT_CURRENCY) ?? "USD",
     m10WorkflowId: optionalText(env.TENANT_M10_WORKFLOW_ID),
+    webhookTokenHash: webhookHash(env.TENANT_WEBHOOK_TOKEN_HASH),
     active: parseActive(env.TENANT_ACTIVE),
   };
 }
@@ -72,6 +74,7 @@ function parseTenantConfig(raw: string): TenantInput {
     timezone: optionalText(record.timezone) ?? "UTC",
     currency: optionalText(record.currency) ?? "USD",
     m10WorkflowId: optionalText(record.m10WorkflowId),
+    webhookTokenHash: webhookHash(record.webhookTokenHash),
     active: record.active === undefined ? true : parseActive(record.active),
   };
 }
@@ -89,6 +92,7 @@ function toTenant(input: TenantInput, encryptionKey: Buffer): Tenant {
     timezone: input.timezone,
     currency: input.currency,
     m10WorkflowId: input.m10WorkflowId,
+    webhookTokenHash: input.webhookTokenHash,
     active: input.active,
   };
 }
@@ -104,6 +108,16 @@ function optionalText(value: unknown): string | null {
   if (typeof value !== "string") throw new Error("Tenant config text fields must be strings");
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function webhookHash(value: unknown): string | null {
+  const text = optionalText(value);
+  if (!text) return null;
+  const normalized = text.toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error("webhookTokenHash must be a 64-character sha256 hex digest");
+  }
+  return normalized;
 }
 
 function parseActive(value: unknown): boolean {

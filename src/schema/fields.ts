@@ -176,6 +176,8 @@ export const M06_HASH_EXCLUDED_KEYS = [
 export const REMOVED_FIELD_KEYS = [
   "customerdaysoverdue",
   "winback_status",
+  "birthday_offer_expires_at",
+  "birth_date_formatter",
 ] as const;
 
 const FIELD_INDEX = new Map<string, FieldDefinition>(FIELDS.map((field) => [field.key, field]));

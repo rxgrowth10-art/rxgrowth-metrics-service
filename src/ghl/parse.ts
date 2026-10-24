@@ -57,6 +57,14 @@ export function parseCustomFields(body: unknown): GhlCustomField[] {
   return fields;
 }
 
+export function parseOrderResource(body: unknown): GhlOrder | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (record.order && typeof record.order === "object") return parseOrder(record.order);
+  if (record.data && typeof record.data === "object" && !Array.isArray(record.data)) return parseOrder(record.data);
+  return parseOrder(body);
+}
+
 function parseOrder(value: unknown): GhlOrder | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -71,8 +79,8 @@ function parseOrder(value: unknown): GhlOrder | null {
     amount: typeof record.amount === "number" || typeof record.amount === "string" ? record.amount : null,
     sourceName: asString(record.sourceName),
     sourceSubType: asString(record.sourceSubType),
-    createdAt: asString(record.createdAt),
-    updatedAt: asString(record.updatedAt),
+    createdAt: asTimestamp(record.createdAt),
+    updatedAt: asTimestamp(record.updatedAt),
     currency: asString(record.currency),
   };
 }
@@ -128,6 +136,11 @@ function readSearchAfter(body: unknown): unknown[] | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asTimestamp(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return asString(value);
 }
 
 function asFieldValue(value: unknown): string | null {

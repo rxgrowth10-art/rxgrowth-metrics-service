@@ -1,6 +1,6 @@
 export type LogLevel = "info" | "warn" | "error";
 
-const SENSITIVE_KEY = /api[_-]?key|authorization|token|secret|password|credential|cipher/i;
+const SENSITIVE_KEY = /api[_-]?key|authorization|token|secret|password|credential|cipher|^t$/i;
 
 export function redact(value: unknown, depth = 0): unknown {
   if (depth > 8) return "[max-depth]";
@@ -12,10 +12,14 @@ export function redact(value: unknown, depth = 0): unknown {
     }
     return output;
   }
-  if (typeof value === "string") {
-    return value.replace(/bearer\s+\S+/gi, "Bearer [redacted]");
-  }
+  if (typeof value === "string") return redactString(value);
   return value;
+}
+
+function redactString(value: string): string {
+  return value
+    .replace(/bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/([^\s?#]*)\?[^\s#]*/g, "$1?[redacted]");
 }
 
 export function log(level: LogLevel, event: string, fields: Record<string, unknown> = {}): void {

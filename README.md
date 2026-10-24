@@ -38,14 +38,14 @@ Copy `.env.example` to `.env.local`. Values are names only; do not commit secret
 | `TENANT_CURRENCY` | no | Defaults to `USD`. Stored only; amounts are not rescaled. |
 | `TENANT_M10_WORKFLOW_ID` | no | Workflow id used when M10 enrollment is enabled. |
 | `TENANT_ACTIVE` | no | `false` or `0` disables the tenant. Defaults to active. |
-| `UPSTASH_REDIS_REST_URL` | production | Upstash Redis REST URL |
-| `UPSTASH_REDIS_REST_TOKEN` | production | Upstash Redis REST token |
+| `TENANT_WEBHOOK_TOKEN_HASH` | production webhook | SHA-256 hex of this tenant's webhook query token. Also accepted as `webhookTokenHash` inside `TENANT_CONFIG`. |
+| `UPSTASH_REDIS_REST_URL` | required when `VERCEL_ENV=production` | Upstash Redis REST URL. Production fails closed if this is unset. |
+| `UPSTASH_REDIS_REST_TOKEN` | required when `VERCEL_ENV=production` | Upstash Redis REST token. |
 | `CRON_SECRET` | yes, for the cron | Bearer token Vercel Cron sends |
-| `WEBHOOK_SHARED_SECRET` | no | When set, `POST /api/webhooks/ghl` requires header `x-webhook-secret`. Leave unset while GoHighLevel cannot sign the webhook. |
 | `GHL_API_BASE_URL` | no | Defaults to `https://services.leadconnectorhq.com`. Version header is `2021-07-28`. |
 | `M10_ENROLL_ENABLED` | no | `true` enrolls newly eligible contacts into `m10_workflow_id`. Default off. |
 
-Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, `secret`, and bearer strings. Do not log tenant API keys.
+Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, `secret`, bearer strings, and every query string. Do not log tenant API keys or webhook tokens.
 
 ## Add a tenant
 
@@ -53,7 +53,7 @@ Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, 
 
 ### Neon (`TENANT_STORE=neon`)
 
-1. Apply `migrations/001_tenants.sql` to the Neon database.
+1. Apply `migrations/001_tenants.sql` and `migrations/002_webhook_token.sql` to the Neon database.
 2. Encrypt the location's GoHighLevel private-integration token. The token is read from stdin and is not passed as an argument:
 
 ```bash
@@ -65,7 +65,7 @@ printf '%s' "$GHL_TOKEN" | node scripts/encrypt-api-key.mjs
 
 ```sql
 INSERT INTO tenants (
-  location_id, name, api_key_encrypted, timezone, currency, m10_workflow_id, active
+  location_id, name, api_key_encrypted, timezone, currency, m10_workflow_id, webhook_token_hash, active
 ) VALUES (
   'LOCATION_ID',
   'Restaurant name',
@@ -73,6 +73,7 @@ INSERT INTO tenants (
   'Africa/Cairo',
   'EGP',
   NULL,
+  'sha256-hex',
   TRUE
 );
 ```
@@ -100,6 +101,24 @@ TENANT_ACTIVE=true
 ```
 
 `apiKey` and `apiKeyEncrypted` are mutually exclusive. A plaintext `apiKey` is encrypted with `TENANT_ENCRYPTION_KEY` before the rest of the service sees it.
+
+## Webhook token
+
+Each tenant has its own query token. The database and env store keep only the SHA-256 hex digest (`webhook_token_hash` / `webhookTokenHash`). A standard GoHighLevel Webhook action cannot set headers, so the token is the `t` query parameter on that location's webhook URL.
+
+Generate a token and its hash. The hash is written to stdout. The token is written to stderr once and is not an argument:
+
+```bash
+node scripts/webhook-token.mjs > /tmp/webhook-hash.txt
+```
+
+Put the hash on the tenant. Put the token only in the workflow URL:
+
+```text
+https://<deployment>/api/webhooks/ghl?t=<token>
+```
+
+Rotate by generating a new pair and replacing that tenant's hash. The previous token stops matching as soon as the hash is saved. In production (`VERCEL_ENV=production`) a tenant with no hash is rejected. Outside production, a missing hash leaves the check off so local tests can run. When a hash is set, it is required in every environment.
 
 Regenerate the field catalog after a fixture change:
 
@@ -141,7 +160,7 @@ Contacts for the cron: `POST /contacts/search` with `pageLimit` and `searchAfter
 
 Custom fields: `PUT /contacts/{contactId}` sends `{ id, key, field_value }` for the fields being changed.
 
-Per-location spacing defaults to 100ms between requests on a warm instance. It is process-local. Retries cover HTTP 429, HTTP 5xx, and network failures, and they honor `Retry-After` up to a cap.
+Per-location spacing defaults to 100ms between requests on a warm instance. It is process-local. Idempotent reads retry HTTP 429, HTTP 5xx, and network failures with exponential backoff and jitter, capped at 20 seconds. `Retry-After` is honored up to 60 seconds. Workflow enrollment `POST` is not retried.
 
 ## Checks
 

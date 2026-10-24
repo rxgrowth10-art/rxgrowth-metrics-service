@@ -40,6 +40,7 @@ export interface CustomFieldWrite {
 
 export interface GhlClient {
   listOrders(contactId: string): Promise<GhlOrder[]>;
+  getOrder(orderId: string): Promise<GhlOrder | null>;
   getContact(contactId: string): Promise<GhlContact>;
   listCustomFields(): Promise<GhlCustomField[]>;
   updateContact(contactId: string, fields: readonly CustomFieldWrite[]): Promise<void>;

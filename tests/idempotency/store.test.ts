@@ -22,14 +22,21 @@ describe("memory idempotency", () => {
     await store.del("lock:loc:contact");
     expect(await store.setNx("lock:loc:contact", 30)).toBe(true);
   });
+
+  it("overwrites a key with set", async () => {
+    const store = new MemoryIdempotencyStore(() => 0);
+    await store.set("rerun:loc:contact", "1", 60);
+    await store.set("rerun:loc:contact", "2", 60);
+    expect(await store.get("rerun:loc:contact")).toBe("2");
+  });
 });
 
 describe("upstash idempotency", () => {
   it("treats SET NX OK as the first claim", async () => {
     const keys = new Map<string, string>();
     const redis: RedisSetNx = {
-      async set(key, value) {
-        if (keys.has(key)) return null;
+      async set(key, value, options) {
+        if (options.nx && keys.has(key)) return null;
         keys.set(key, value);
         return "OK";
       },
@@ -47,5 +54,16 @@ describe("upstash idempotency", () => {
     expect(await store.get("m10:loc:2026-10-24")).toBe("1");
     await store.del("m10:loc:2026-10-24");
     expect(await store.get("m10:loc:2026-10-24")).toBeNull();
+    await store.set("rerun:loc:contact", "1", 60);
+    expect(await store.get("rerun:loc:contact")).toBe("1");
+  });
+});
+
+describe("idempotency selection", () => {
+  it("fails closed in production when Upstash is not configured", async () => {
+    const { createIdempotencyStore } = await import("../../src/idempotency");
+    expect(() => createIdempotencyStore({ VERCEL_ENV: "production" })).toThrow(/UPSTASH_REDIS/);
+    const store = createIdempotencyStore({ VERCEL_ENV: "development" });
+    expect(await store.setNx("evt:test", 10)).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ import { Redis } from "@upstash/redis";
 import type { IdempotencyStore } from "./types";
 
 export interface RedisSetNx {
-  set(key: string, value: string, options: { nx: true; ex: number }): Promise<string | null>;
+  set(key: string, value: string, options: { nx?: true; ex: number }): Promise<string | null>;
   del(key: string): Promise<unknown>;
   get(key: string): Promise<unknown>;
 }
@@ -12,6 +12,9 @@ export function createUpstashIdempotency(redis: RedisSetNx): IdempotencyStore {
     async setNx(key, ttlSeconds) {
       const result = await redis.set(key, "1", { nx: true, ex: ttlSeconds });
       return result === "OK";
+    },
+    async set(key, value, ttlSeconds) {
+      await redis.set(key, value, { ex: ttlSeconds });
     },
     async del(key) {
       await redis.del(key);

@@ -35,4 +35,18 @@ describe("logger", () => {
     expect(parsed.data.apiKey).toBe("[redacted]");
     expect(line).not.toContain("pit-secret");
   });
+
+  it("strips query strings so webhook tokens are not logged", () => {
+    const token = "super-secret-webhook-token";
+    const redacted = redact({
+      url: `https://example.test/api/webhooks/ghl?t=${token}&locationId=loc`,
+      t: token,
+      note: `failed request /hook?t=${token}`,
+    });
+    expect(JSON.stringify(redacted)).not.toContain(token);
+    expect(redacted).toMatchObject({
+      url: "https://example.test/api/webhooks/ghl?[redacted]",
+      t: "[redacted]",
+    });
+  });
 });

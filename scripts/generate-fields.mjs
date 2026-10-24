@@ -42,7 +42,12 @@ const WORKFLOW_OWNED_KEYS = ["winback_cycle_status", "winback_cycle_started_at"]
 
 const HASH_EXCLUDED_KEYS = ["metrics_hash", "m06_intelligence_updated_at"];
 
-const REMOVED_FIELD_KEYS = ["customerdaysoverdue", "winback_status"];
+const REMOVED_FIELD_KEYS = [
+  "customerdaysoverdue",
+  "winback_status",
+  "birthday_offer_expires_at",
+  "birth_date_formatter",
+];
 
 const raw = JSON.parse(readFileSync(fixturePath, "utf8"));
 if (!Array.isArray(raw) || raw.length === 0) {

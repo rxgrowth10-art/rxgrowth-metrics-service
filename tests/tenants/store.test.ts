@@ -9,6 +9,7 @@ const tenant: Tenant = {
   timezone: "Africa/Cairo",
   currency: "EGP",
   m10WorkflowId: "wf_1",
+  webhookTokenHash: null,
   active: true,
 };
 
@@ -44,8 +45,21 @@ describe("neon tenant row mapping", () => {
       timezone: "Africa/Cairo",
       currency: "EGP",
       m10WorkflowId: null,
+      webhookTokenHash: null,
       active: true,
     });
+    expect(
+      mapTenantRow({
+        location_id: "loc_1",
+        name: "Test Lab",
+        api_key_encrypted: "v1:ciphertext",
+        timezone: "Africa/Cairo",
+        currency: "EGP",
+        m10_workflow_id: null,
+        webhook_token_hash: "ab".repeat(32),
+        active: true,
+      }).webhookTokenHash,
+    ).toBe("ab".repeat(32));
   });
 });
 
@@ -64,5 +78,7 @@ describe("tenant migration", () => {
       expect(sql).toContain(column);
     }
     expect(sql).toContain("AES-256-GCM");
+    const added = readFileSync(new URL("../../migrations/002_webhook_token.sql", import.meta.url), "utf8");
+    expect(added).toContain("webhook_token_hash");
   });
 });

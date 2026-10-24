@@ -13,8 +13,12 @@ export class MemoryIdempotencyStore implements IdempotencyStore {
   async setNx(key: string, ttlSeconds: number): Promise<boolean> {
     this.purge(key);
     if (this.entries.has(key)) return false;
-    this.entries.set(key, { value: "1", expiresAt: this.now() + ttlSeconds * 1000 });
+    await this.set(key, "1", ttlSeconds);
     return true;
+  }
+
+  async set(key: string, value: string, ttlSeconds: number): Promise<void> {
+    this.entries.set(key, { value, expiresAt: this.now() + ttlSeconds * 1000 });
   }
 
   async del(key: string): Promise<void> {

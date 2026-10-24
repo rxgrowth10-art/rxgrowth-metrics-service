@@ -18,6 +18,7 @@ describe("env tenant store", () => {
         timezone: "Africa/Cairo",
         currency: "EGP",
         m10WorkflowId: "wf_env",
+        webhookTokenHash: "ab".repeat(32),
         active: true,
       }),
     });
@@ -25,6 +26,7 @@ describe("env tenant store", () => {
     expect(tenant?.name).toBe("Env Lab");
     expect(tenant?.timezone).toBe("Africa/Cairo");
     expect(tenant?.m10WorkflowId).toBe("wf_env");
+    expect(tenant?.webhookTokenHash).toBe("ab".repeat(32));
     expect(decryptApiKey(tenant?.apiKeyEncrypted ?? "", KEY)).toBe("pit-env");
     expect(await store.getByLocationId("other")).toBeNull();
     expect((await store.listActive()).map((item) => item.locationId)).toEqual(["loc_env"]);

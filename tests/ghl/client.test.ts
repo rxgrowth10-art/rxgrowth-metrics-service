@@ -142,6 +142,7 @@ describe("GHL client", () => {
       rateLimiter: new LocationRateLimiter(0, clock),
       baseDelayMs: 10,
       maxRetries: 2,
+      random: () => 1,
       fetchImpl: async () => {
         calls += 1;
         if (calls === 1) throw new Error("socket hang up");
@@ -238,5 +239,103 @@ describe("GHL client", () => {
     });
     expect(calls[1]?.url).toContain("/contacts/contact_1/workflow/wf_1");
     expect(JSON.stringify(calls)).not.toContain(API_KEY);
+  });
+
+  it("honors Retry-After above the jitter cap and jitters synthesized backoff", async () => {
+    const clock = fakeClock();
+    let calls = 0;
+    const client = createGhlClient({
+      apiKey: API_KEY,
+      locationId: "loc_1",
+      clock,
+      rateLimiter: new LocationRateLimiter(0, clock),
+      baseDelayMs: 100,
+      maxDelayMs: 1000,
+      maxRetries: 1,
+      random: () => 0,
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) return jsonResponse({}, 429, { "retry-after": "2" });
+        return jsonResponse({ contact: { id: "contact_1", customFields: [] } });
+      },
+    });
+    await client.getContact("contact_1");
+    expect(clock.sleeps).toEqual([2000]);
+
+    const jittered = fakeClock();
+    let attempts = 0;
+    const jitterClient = createGhlClient({
+      apiKey: API_KEY,
+      locationId: "loc_1",
+      clock: jittered,
+      rateLimiter: new LocationRateLimiter(0, jittered),
+      baseDelayMs: 100,
+      maxDelayMs: 1000,
+      maxRetries: 1,
+      random: () => 0,
+      fetchImpl: async () => {
+        attempts += 1;
+        if (attempts === 1) return jsonResponse({}, 503);
+        return jsonResponse({ contact: { id: "contact_1", customFields: [] } });
+      },
+    });
+    await jitterClient.getContact("contact_1");
+    expect(jittered.sleeps).toEqual([50]);
+  });
+
+  it("does not retry workflow enrollment", async () => {
+    const clock = fakeClock();
+    let calls = 0;
+    const client = createGhlClient({
+      apiKey: API_KEY,
+      locationId: "loc_1",
+      clock,
+      rateLimiter: new LocationRateLimiter(0, clock),
+      maxRetries: 2,
+      fetchImpl: async () => {
+        calls += 1;
+        return jsonResponse({}, 503);
+      },
+    });
+    await expect(client.addContactToWorkflow("contact_1", "wf_1")).rejects.toThrow(/503/);
+    expect(calls).toBe(1);
+    expect(clock.sleeps).toEqual([]);
+  });
+
+  it("drops orders for a different contact and loads one order with altId", async () => {
+    const clock = fakeClock();
+    const urls: string[] = [];
+    const client = createGhlClient({
+      apiKey: API_KEY,
+      locationId: "loc_1",
+      clock,
+      rateLimiter: new LocationRateLimiter(0, clock),
+      fetchImpl: async (input) => {
+        const url = String(input);
+        urls.push(url);
+        if (url.includes("/payments/orders/order_9")) {
+          return jsonResponse({
+            _id: "order_9",
+            contactId: "contact_1",
+            amount: 93.5,
+            paymentStatus: "unpaid",
+            liveMode: true,
+            createdAt: 1767225600000,
+          });
+        }
+        return jsonResponse({
+          data: [
+            { _id: "keep", contactId: "contact_1", amount: 10, paymentStatus: "paid", liveMode: true },
+            { _id: "drop", contactId: "someone_else", amount: 99, paymentStatus: "paid", liveMode: true },
+          ],
+          totalCount: 2,
+        });
+      },
+    });
+    const orders = await client.listOrders("contact_1");
+    expect(orders.map((order) => order.id)).toEqual(["keep"]);
+    const detail = await client.getOrder("order_9");
+    expect(detail).toMatchObject({ id: "order_9", amount: 93.5, createdAt: "1767225600000", paymentStatus: "unpaid" });
+    expect(urls.some((url) => url.includes("altType=location") && url.includes("order_9"))).toBe(true);
   });
 });
