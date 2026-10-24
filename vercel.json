@@ -7,6 +7,15 @@
     },
     "api/webhooks/ghl.ts": {
       "maxDuration": 15
+    },
+    "api/cron/m10.ts": {
+      "maxDuration": 300
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/m10",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }

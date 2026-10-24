@@ -8,3 +8,5 @@ export { recencyBucket } from "./recency";
 export { mean, median, round2 } from "./round";
 export { calculateTrend } from "./trends";
 export type { CustomerMetrics, MetricOrder, Trend } from "./types";
+export { evaluateWinback, MIN_DAYS_SINCE_LAST_ORDER, MIN_OVERDUE_RATIO, MIN_QUALIFYING_ORDERS } from "./winback";
+export type { WinbackDecision, WinbackInput } from "./winback";
