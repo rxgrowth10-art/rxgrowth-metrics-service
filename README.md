@@ -48,7 +48,7 @@ A contact is eligible when the qualifying count is at least 3, days since the la
 
 The only fields written are `winback_eligibility` and `winback_tier`, and only when those values change. `winback_cycle_status` and `winback_cycle_started_at` are never written.
 
-`M10_ENROLL_ENABLED=true` adds a contact to the tenant's `m10_workflow_id` when eligibility transitions to `Eligible`. The flag defaults off. An enrollment failure is logged and does not roll back the field write; a later run will not retry enrollment once the contact is already `Eligible`.
+`M10_ENROLL_ENABLED=true` adds an eligible contact to the tenant's `m10_workflow_id`. The flag defaults off. Enrollment is recorded on its own key, `m10enroll:{locationId}:{contactId}`, for 180 days. The eligibility fields are still written when the workflow call fails. A later cron day retries that call until it succeeds, including when the contact is already `Eligible`. The marker is removed when the contact is not eligible, so a later cycle can enroll again. A recorded success is not repeated while the marker is present.
 
 ## Divergences from the M10 calculator
 
@@ -196,6 +196,7 @@ The workflow owns `winback_cycle_status` and `winback_cycle_started_at`. This se
 | `lock:{locationId}:{contactId}` | 30s | One in-flight computation per contact |
 | `rerun:{locationId}:{contactId}` | 120s | A nudge arrived during the lock and must be computed again |
 | `m10:{locationId}:{YYYY-MM-DD}` | 36 hours | One daily cron pass per location. The date is the tenant's calendar day. |
+| `m10enroll:{locationId}:{contactId}` | 180 days | Workflow enrollment already succeeded for this eligibility stretch. Deleted when the contact is not eligible. |
 
 `YYYY-MM-DD` is the date in the tenant timezone.
 

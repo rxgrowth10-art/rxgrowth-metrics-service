@@ -33,11 +33,17 @@ function contact(id: string, values: Record<string, string>): GhlContact {
   };
 }
 
-function harness(options?: { enroll?: boolean; contacts?: GhlContact[]; failSearch?: boolean }) {
+function harness(options?: {
+  enroll?: boolean;
+  contacts?: GhlContact[];
+  failSearch?: boolean;
+  failEnrollTimes?: number;
+}) {
   const tenants = new MemoryTenantStore();
   const updates: Array<{ contactId: string; fields: CustomFieldWrite[] }> = [];
   const enrollments: string[] = [];
   let searches = 0;
+  let enrollFailuresLeft = options?.failEnrollTimes ?? 0;
   const ghl: GhlClient = {
     async listOrders() {
       throw new Error("m10 must not refetch orders");
@@ -55,6 +61,13 @@ function harness(options?: { enroll?: boolean; contacts?: GhlContact[]; failSear
     },
     async updateContact(contactId, fields) {
       updates.push({ contactId, fields: [...fields] });
+      const person = options?.contacts?.find((item) => item.id === contactId);
+      if (!person) return;
+      for (const field of fields) {
+        const existing = person.customFields.find((item) => item.id === field.id);
+        if (existing) existing.value = field.value;
+        else person.customFields.push({ id: field.id, key: field.key, value: field.value });
+      }
     },
     async searchContacts() {
       searches += 1;
@@ -62,6 +75,10 @@ function harness(options?: { enroll?: boolean; contacts?: GhlContact[]; failSear
       return options?.contacts ?? [];
     },
     async addContactToWorkflow(contactId, workflowId) {
+      if (enrollFailuresLeft > 0) {
+        enrollFailuresLeft -= 1;
+        throw new Error("workflow down");
+      }
       enrollments.push(`${contactId}:${workflowId}`);
     },
   };
@@ -75,6 +92,13 @@ function harness(options?: { enroll?: boolean; contacts?: GhlContact[]; failSear
     now: () => NOW,
   };
   return { deps, tenants, updates, enrollments, searches: () => searches };
+}
+
+function setContactValue(person: GhlContact, key: string, value: string): void {
+  const field = FIELDS.find((item) => item.key === key);
+  const existing = person.customFields.find((item) => item.id === field?.testLabId);
+  if (!existing) throw new Error(key);
+  existing.value = value;
 }
 
 function cronRequest(authorization?: string): Request {
@@ -159,6 +183,70 @@ describe("M10 win-back cron", () => {
     const response = await handleM10Cron(cronRequest("Bearer cron-secret"), on.deps);
     expect(((await response.json()) as { enrolled: number }).enrolled).toBe(1);
     expect(on.enrollments).toEqual(["new_eligible:wf_m10"]);
+  });
+
+  it("retries workflow enrollment on a later day after eligibility was already written", async () => {
+    let now = new Date("2026-06-22T12:00:00.000Z");
+    const run = harness({
+      enroll: true,
+      failEnrollTimes: 1,
+      contacts: [
+        contact("retry", {
+          qualifying_order_count: "3",
+          last_order_date: "2026-05-25",
+          typical_order_interval_days: "14",
+          winback_eligibility: "Not Eligible",
+          winback_tier: "None",
+        }),
+      ],
+    });
+    run.deps.now = () => now;
+    await run.tenants.upsert(tenant());
+
+    const first = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(await first.json()).toMatchObject({ written: 1, enrolled: 0, errors: 1 });
+    expect(run.updates[0]?.fields.map((field) => field.value)).toEqual(["Eligible", "High"]);
+    expect(run.enrollments).toEqual([]);
+    expect(await run.deps.idempotency.get("m10enroll:loc_1:retry")).toBeNull();
+
+    now = new Date("2026-06-23T12:00:00.000Z");
+    const second = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(await second.json()).toMatchObject({ written: 0, enrolled: 1, errors: 0, skippedUnchanged: 1 });
+    expect(run.enrollments).toEqual(["retry:wf_m10"]);
+
+    now = new Date("2026-06-24T12:00:00.000Z");
+    const third = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(await third.json()).toMatchObject({ written: 0, enrolled: 0 });
+    expect(run.enrollments).toEqual(["retry:wf_m10"]);
+  });
+
+  it("enrolls again after the contact leaves eligibility and returns", async () => {
+    let now = new Date("2026-06-22T12:00:00.000Z");
+    const person = contact("cycle", {
+      qualifying_order_count: "3",
+      last_order_date: "2026-05-25",
+      typical_order_interval_days: "14",
+      winback_eligibility: "Not Eligible",
+      winback_tier: "None",
+    });
+    const run = harness({ enroll: true, contacts: [person] });
+    run.deps.now = () => now;
+    await run.tenants.upsert(tenant());
+    await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(run.enrollments).toEqual(["cycle:wf_m10"]);
+    expect(await run.deps.idempotency.get("m10enroll:loc_1:cycle")).toBe("1");
+
+    setContactValue(person, "qualifying_order_count", "2");
+    now = new Date("2026-06-23T12:00:00.000Z");
+    const dropped = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(await dropped.json()).toMatchObject({ written: 1, enrolled: 0 });
+    expect(await run.deps.idempotency.get("m10enroll:loc_1:cycle")).toBeNull();
+
+    setContactValue(person, "qualifying_order_count", "3");
+    now = new Date("2026-06-24T12:00:00.000Z");
+    const returned = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(await returned.json()).toMatchObject({ enrolled: 1 });
+    expect(run.enrollments).toEqual(["cycle:wf_m10", "cycle:wf_m10"]);
   });
 
   it("uses the tenant calendar day for the 21-day gate and the daily lock", async () => {

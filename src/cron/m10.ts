@@ -10,6 +10,7 @@ import { businessDateString, calendarDayDifference, parseStoredDate } from "../t
 import { buildFieldIdMap, readContactField, requireFieldId } from "../writeback/fields";
 
 const LOCK_TTL_SECONDS = 60 * 60 * 36;
+const ENROLL_TTL_SECONDS = 60 * 60 * 24 * 180;
 
 export interface M10Deps {
   tenants: TenantStore;
@@ -96,6 +97,7 @@ async function runTenant(client: GhlClient, tenant: Tenant, deps: M10Deps, summa
     }
     const currentEligibility = readContactField(contact, "winback_eligibility", ids);
     const currentTier = readContactField(contact, "winback_tier", ids);
+    await syncEnrollment(client, tenant, contact.id, decision, deps, summary);
     if (currentEligibility === decision.eligibility && currentTier === decision.tier) {
       summary.skippedUnchanged += 1;
       continue;
@@ -109,19 +111,39 @@ async function runTenant(client: GhlClient, tenant: Tenant, deps: M10Deps, summa
       { id: requireFieldId(ids, "winback_tier"), key: "winback_tier", value: decision.tier },
     ]);
     summary.written += 1;
-    if (deps.enrollEnabled && decision.eligible && tenant.m10WorkflowId && currentEligibility !== "Eligible") {
-      try {
-        await client.addContactToWorkflow(contact.id, tenant.m10WorkflowId);
-        summary.enrolled += 1;
-      } catch (error) {
-        summary.errors += 1;
-        log("error", "m10.enroll_failed", {
-          locationId: tenant.locationId,
-          contactId: contact.id,
-          message: error instanceof Error ? error.message : "unknown",
-        });
-      }
-    }
+  }
+}
+
+function enrollMarker(locationId: string, contactId: string): string {
+  return `m10enroll:${locationId}:${contactId}`;
+}
+
+async function syncEnrollment(
+  client: GhlClient,
+  tenant: Tenant,
+  contactId: string,
+  decision: WinbackDecision,
+  deps: M10Deps,
+  summary: M10Summary,
+): Promise<void> {
+  const marker = enrollMarker(tenant.locationId, contactId);
+  if (!decision.eligible) {
+    await deps.idempotency.del(marker);
+    return;
+  }
+  if (!deps.enrollEnabled || !tenant.m10WorkflowId) return;
+  if (await deps.idempotency.get(marker)) return;
+  try {
+    await client.addContactToWorkflow(contactId, tenant.m10WorkflowId);
+    await deps.idempotency.setNx(marker, ENROLL_TTL_SECONDS);
+    summary.enrolled += 1;
+  } catch (error) {
+    summary.errors += 1;
+    log("error", "m10.enroll_failed", {
+      locationId: tenant.locationId,
+      contactId,
+      message: error instanceof Error ? error.message : "unknown",
+    });
   }
 }
 
