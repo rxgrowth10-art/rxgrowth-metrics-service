@@ -4,6 +4,9 @@
   "functions": {
     "api/health.ts": {
       "maxDuration": 10
+    },
+    "api/webhooks/ghl.ts": {
+      "maxDuration": 15
     }
   }
 }

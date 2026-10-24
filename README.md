@@ -15,10 +15,20 @@ This revision is the foundation: field contract, tenant store, GoHighLevel clien
 - `migrations/001_tenants.sql` — Neon schema.
 - `fixtures/test-lab-fields.json` — final custom-field snapshot for location `ekxOqjUKW7M6OV9XAVnx`.
 
-Planned handlers, built on this foundation:
+- `api/webhooks/ghl.ts` — M06 nudge. `POST` JSON `{ "locationId", "contactId" }`. Any other property is ignored. Unknown or inactive tenants return 202 without calling GoHighLevel. A repeat of the same event within 300 seconds is processed once.
+- `api/cron/m10.ts` — daily win-back pass, still to be added. It will require `Authorization: Bearer $CRON_SECRET`.
 
-- `api/webhooks/ghl.ts` — M06. Accepts only `locationId` and `contactId`, returns 202, ignores every other payload value.
-- `api/cron/m10.ts` — daily win-back pass, authorized with `Authorization: Bearer $CRON_SECRET`.
+## Webhook
+
+```bash
+curl -X POST https://<deployment>/api/webhooks/ghl \
+  -H 'content-type: application/json' \
+  -d '{"locationId":"LOCATION_ID","contactId":"CONTACT_ID"}'
+```
+
+The handler returns 202 after it re-fetches orders and either writes metrics or skips an unchanged hash. It returns 400 when `locationId` or `contactId` is missing, 401 when `WEBHOOK_SHARED_SECRET` is set and `x-webhook-secret` does not match, and 500 when processing fails so the sender can retry. A standard GoHighLevel Webhook action cannot sign requests, so the shared-secret header is optional until something in front of the function adds it.
+
+M06 never writes `winback_eligibility` or `winback_tier`.
 
 ## Environment
 
@@ -143,7 +153,9 @@ M06 writes these keys (and does not write win-back eligibility):
 
 `total_orders`, `qualifying_order_count`, `first_order_date`, `last_order_date`, `lifetime_value`, `average_order_value`, `highest_order_value`, `lowest_order_value`, `customer_type`, `customer_status`, `lifecycle_stage`, `last_order_location`, `last_order_type`, `average_order_interval_days`, `typical_order_interval_days`, `orders_last_30_days`, `orders_previous_30_days`, `spend_last_30_days`, `spend_previous_30_days`, `order_frequency_trend`, `spending_trend`, `days_since_last_order`, `expected_next_order_date`, `days_overdue`, `overdue_ratio`, `metrics_hash`, `m06_intelligence_updated_at`.
 
-`metrics_hash` is a sha256 of the written values. `m06_intelligence_updated_at` is excluded from that hash so an unchanged metric set can skip the contact update entirely.
+`metrics_hash` is a sha256 of the formatted values M06 would write. `m06_intelligence_updated_at` is excluded from that hash. When the stored hash matches, the contact `PUT` is skipped entirely, which stops a Contact Changed workflow from looping on its own write. The timestamp therefore moves only when some other written value changes.
+
+`average_order_interval_days` is the mean of the collapsed intervals. `typical_order_interval_days` is the median. `days_overdue` and `overdue_ratio` are rounded to two decimals. `last_order_type` comes from the latest qualifying order's `sourceSubType` (matched to Delivery / Pickup / Dine-in when possible). `last_order_location` comes from `sourceName`. Dates are `YYYY-MM-DD` in the tenant timezone.
 
 M10 writes only `winback_eligibility` and `winback_tier`.
 
@@ -168,6 +180,24 @@ Contacts for the cron: `POST /contacts/search` with `pageLimit` and `searchAfter
 Custom fields: `PUT /contacts/{contactId}` sends `{ id, key, field_value }` for the fields being changed.
 
 Per-location spacing defaults to 100ms between requests on a warm instance. It is process-local. Idempotent reads retry HTTP 429, HTTP 5xx, and network failures with exponential backoff and jitter, capped at 20 seconds. `Retry-After` is honored up to 60 seconds. Workflow enrollment `POST` is not retried.
+
+## Divergences from the STENZ custom code
+
+The attached M06 resolver is the starting point. These locked rules replace it:
+
+- Qualifying orders are `liveMode && !markAsTest && amount > 0 && status !== cancelled && paymentStatus in paid, unpaid, partially_paid`. The resolver instead required `status === "completed"` and ignored payment status, so a completed refunded order qualified and an unpaid COD order only qualified when its status was exactly `completed`. Fulfillment status still does not disqualify an order. The resolver also required `contactId`; this service does not, because orders are already fetched for one contact.
+- `total_orders`, `qualifying_order_count`, and lifetime value count every qualifying order. Interval math collapses orders that share a calendar day in the tenant timezone, so there are no 0-day gaps. The resolver pushed a 0-day interval for same-day orders. Two orders on day 1 and one on day 11 are 3 orders and intervals `[10]`. Three orders on one day produce `intervals = []`, `typical_order_interval_days` empty, and `overdue_ratio` empty.
+- The resolver computed win-back eligibility inside M06 (`>= 2` orders, no 21-day minimum) and a tier even when the contact was not eligible. M06 here does not write eligibility or tier. The daily cron will use the M10 calculator rule.
+- The resolver left `daysOverdue` unrounded. Values here are rounded to two decimals, including inside M06.
+- The resolver set `lastOrderType` to null on purpose. It is now `sourceSubType`.
+- The resolver's last lifecycle label was `LOST / DORMANT`. The field is written as `LOST`. Zero qualifying orders stay `NO QUALIFYING ORDERS`, which is the resolver's label and is not one of the six non-empty stages.
+- `qualifying_order_count`, `lifecycle_stage`, and `metrics_hash` were not written by the resolver. They are written now. `m06_intelligence_updated_at` is the updated-at field. There is no `metrics_updated_at`.
+- The resolver's contact update reformatted dates to `MM-DD-YYYY`. DATE custom fields are written as `YYYY-MM-DD`.
+- The resolver loaded orders with one `limit=500` request. Orders are paged with `offset` until `totalCount`.
+- `total_orders` stays the qualifying count, matching the resolver. `qualifying_order_count` is that same full count, not the count of distinct days.
+- The mapping note cited overdue-ratio id `utMAZhK2y8laZAfqAJXb`. The test-lab snapshot id is `PysK1ynJ47hCLa8y2G6u`. Runtime mapping uses the key, and the snapshot is the id fixture.
+
+Preserved from the resolver: average interval is the mean, typical interval is the median, customer type/status bands, 30-day trend comparison, and trailing-12-month frequency labels (those labels are computed and not written; no contact field is assigned to them).
 
 ## Checks
 
