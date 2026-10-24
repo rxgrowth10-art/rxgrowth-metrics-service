@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CustomFieldWrite, GhlClient, GhlContact } from "../../src/ghl";
 import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields";
+import { coerceLastOrderType } from "../../src/writeback/format";
 import { metricsHash } from "../../src/writeback/hash";
 import { writeM06Metrics } from "../../src/writeback/m06";
 import { order } from "../helpers/orders";
@@ -111,6 +112,68 @@ describe("M06 writeback", () => {
     expect(third.written).toBe(true);
     expect(third.hash).not.toBe(first.hash);
     expect(updates).toHaveLength(2);
+  });
+
+  it("writes total_orders as the qualifying count and NO QUALIFYING ORDERS when nothing qualifies", async () => {
+    const mixed = clientWith();
+    await writeM06Metrics({
+      client: mixed.client,
+      contactId: "contact_1",
+      orders: [
+        order({ amount: 15, paymentStatus: "unpaid", createdAt: "2026-01-01T12:00:00.000Z" }),
+        order({ amount: 40, paymentStatus: "refunded", createdAt: "2026-01-02T12:00:00.000Z" }),
+        order({ amount: 5, status: "cancelled", createdAt: "2026-01-03T12:00:00.000Z" }),
+      ],
+      timeZone: "UTC",
+      now: NOW,
+    });
+    const mixedValue = (key: string) => mixed.updates[0]?.find((field) => field.key === key)?.value;
+    expect(mixedValue("total_orders")).toBe("1");
+    expect(mixedValue("qualifying_order_count")).toBe("1");
+    expect(mixedValue("lifetime_value")).toBe("15.00");
+
+    const none = clientWith();
+    await writeM06Metrics({
+      client: none.client,
+      contactId: "contact_1",
+      orders: [order({ amount: 10, markAsTest: true })],
+      timeZone: "UTC",
+      now: NOW,
+    });
+    const noneValue = (key: string) => none.updates[0]?.find((field) => field.key === key)?.value;
+    expect(noneValue("total_orders")).toBe("0");
+    expect(noneValue("qualifying_order_count")).toBe("0");
+    expect(noneValue("lifecycle_stage")).toBe("NO QUALIFYING ORDERS");
+  });
+
+  it("omits last_order_type unless sourceSubType maps to the picklist", async () => {
+    expect(coerceLastOrderType("PICKUP")).toBe("Pickup");
+    expect(coerceLastOrderType("dine_in")).toBe("Dine-in");
+    expect(coerceLastOrderType("dinein")).toBe("Dine-in");
+    expect(coerceLastOrderType("store")).toBe("");
+    expect(coerceLastOrderType("  ")).toBe("");
+
+    const unmapped = clientWith();
+    await writeM06Metrics({
+      client: unmapped.client,
+      contactId: "contact_1",
+      orders: [order({ sourceSubType: "store", createdAt: "2026-01-01T12:00:00.000Z" })],
+      timeZone: "UTC",
+      now: NOW,
+    });
+    const fields = unmapped.updates[0] ?? [];
+    expect(fields.map((field) => field.key)).toEqual(M06_WRITTEN_KEYS.filter((key) => key !== "last_order_type"));
+    expect(fields.some((field) => field.key === "last_order_type")).toBe(false);
+
+    const mapped = clientWith();
+    await writeM06Metrics({
+      client: mapped.client,
+      contactId: "contact_1",
+      orders: [order({ sourceSubType: "DINE-IN", createdAt: "2026-01-01T12:00:00.000Z" })],
+      timeZone: "UTC",
+      now: NOW,
+    });
+    expect(mapped.updates[0]?.find((field) => field.key === "last_order_type")?.value).toBe("Dine-in");
   });
 
   it("hashes the written values independent of key order and ignores the timestamp", () => {

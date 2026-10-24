@@ -32,13 +32,14 @@ export function formatM06Values(metrics: CustomerMetrics): Record<string, string
 }
 
 export function coerceLastOrderType(value: string | null): string {
-  if (!value) return "";
+  if (!value || !value.trim()) return "";
+  const normalized = value.trim().toLowerCase();
   const options = fieldByKey("last_order_type")?.picklistOptions ?? [];
-  const match = options.find((option) => option.toLowerCase() === value.trim().toLowerCase());
-  if (match) return match;
-  const alias = LAST_ORDER_TYPE_ALIASES[value.trim().toLowerCase()];
-  if (alias && options.includes(alias)) return alias;
-  return value.trim();
+  const direct = options.find((option) => option.toLowerCase() === normalized);
+  if (direct) return direct;
+  const alias = LAST_ORDER_TYPE_ALIASES[normalized];
+  if (!alias) return "";
+  return options.find((option) => option.toLowerCase() === alias.toLowerCase()) ?? "";
 }
 
 const LAST_ORDER_TYPE_ALIASES: Record<string, string> = {

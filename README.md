@@ -2,7 +2,7 @@
 
 Multi-tenant customer metrics for restaurant locations on GoHighLevel. A workflow Webhook action sends `locationId` and `contactId`. This service loads that tenant's API key, re-fetches the contact's orders, computes metrics, and writes them back to contact custom fields.
 
-This revision is the foundation: field contract, tenant store, GoHighLevel client, idempotency, and health check. The M06 webhook and the M10 daily cron are the next changes on top of these modules. Nothing here calls GoHighLevel or provisions a Vercel project.
+This revision adds the M06 webhook on top of the foundation. The M10 daily cron is the next change. Nothing here calls GoHighLevel or provisions a Vercel project.
 
 ## Layout
 
@@ -155,7 +155,7 @@ M06 writes these keys (and does not write win-back eligibility):
 
 `metrics_hash` is a sha256 of the formatted values M06 would write. `m06_intelligence_updated_at` is excluded from that hash. When the stored hash matches, the contact `PUT` is skipped entirely, which stops a Contact Changed workflow from looping on its own write. The timestamp therefore moves only when some other written value changes.
 
-`average_order_interval_days` is the mean of the collapsed intervals. `typical_order_interval_days` is the median. `days_overdue` and `overdue_ratio` are rounded to two decimals. `last_order_type` comes from the latest qualifying order's `sourceSubType` (matched to Delivery / Pickup / Dine-in when possible). `last_order_location` comes from `sourceName`. Dates are `YYYY-MM-DD` in the tenant timezone.
+`average_order_interval_days` is the mean of the collapsed intervals. `typical_order_interval_days` is the median. `days_overdue` and `overdue_ratio` are rounded to two decimals. `total_orders` and `qualifying_order_count` are the same full qualifying count. Zero qualifying orders write `lifecycle_stage` as `NO QUALIFYING ORDERS`. `last_order_type` is written only when the latest qualifying order's `sourceSubType` maps to Delivery, Pickup, or Dine-in (case-insensitive, with `dine_in` and `dinein` accepted as Dine-in). Any other value is omitted from the contact update so a picklist rejection cannot fail the rest of the write. `last_order_location` comes from `sourceName`. Dates are `YYYY-MM-DD` in the tenant timezone.
 
 M10 writes only `winback_eligibility` and `winback_tier`.
 
@@ -189,7 +189,7 @@ The attached M06 resolver is the starting point. These locked rules replace it:
 - `total_orders`, `qualifying_order_count`, and lifetime value count every qualifying order. Interval math collapses orders that share a calendar day in the tenant timezone, so there are no 0-day gaps. The resolver pushed a 0-day interval for same-day orders. Two orders on day 1 and one on day 11 are 3 orders and intervals `[10]`. Three orders on one day produce `intervals = []`, `typical_order_interval_days` empty, and `overdue_ratio` empty.
 - The resolver computed win-back eligibility inside M06 (`>= 2` orders, no 21-day minimum) and a tier even when the contact was not eligible. M06 here does not write eligibility or tier. The daily cron will use the M10 calculator rule.
 - The resolver left `daysOverdue` unrounded. Values here are rounded to two decimals, including inside M06.
-- The resolver set `lastOrderType` to null on purpose. It is now `sourceSubType`.
+- The resolver set `lastOrderType` to null on purpose. It is now `sourceSubType` when that maps onto Delivery, Pickup, or Dine-in. Any other value is left off the contact update.
 - The resolver's last lifecycle label was `LOST / DORMANT`. The field is written as `LOST`. Zero qualifying orders stay `NO QUALIFYING ORDERS`, which is the resolver's label and is not one of the six non-empty stages.
 - `qualifying_order_count`, `lifecycle_stage`, and `metrics_hash` were not written by the resolver. They are written now. `m06_intelligence_updated_at` is the updated-at field. There is no `metrics_updated_at`.
 - The resolver's contact update reformatted dates to `MM-DD-YYYY`. DATE custom fields are written as `YYYY-MM-DD`.

@@ -36,9 +36,12 @@ export async function writeM06Metrics(args: {
     metrics_hash: hash,
     m06_intelligence_updated_at: updatedAt,
   };
+  const keysToWrite = M06_WRITTEN_KEYS.filter(
+    (key) => key !== "last_order_type" || (payload.last_order_type ?? "") !== "",
+  );
   await args.client.updateContact(
     args.contactId,
-    M06_WRITTEN_KEYS.map((key) => ({
+    keysToWrite.map((key) => ({
       id: requireFieldId(ids, key),
       key,
       value: payload[key] ?? "",

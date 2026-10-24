@@ -43,12 +43,35 @@ describe("lifecycle and customer status", () => {
     expect(single.customerStatus).toBe("New");
     const none = computeM06([], "UTC", NOW);
     expect(none.lifecycleStage).toBe("NO QUALIFYING ORDERS");
+    expect(none.totalOrders).toBe(0);
+    expect(none.qualifyingOrderCount).toBe(0);
+    expect(none.totalOrders).toBe(none.qualifyingOrderCount);
     expect(none.customerType).toBe("Lead");
     expect(none.customerStatus).toBe("New");
     expect(customerStatus(2, 60)).toBe("Active");
     expect(customerStatus(2, 61)).toBe("At Risk");
     expect(customerStatus(2, 91)).toBe("Lapsed");
     expect(customerStatus(2, 181)).toBe("Lost");
+  });
+
+  it("sets total_orders to the qualifying count and labels a non-qualifying history as no orders", () => {
+    const mixed = computeM06(
+      [
+        order({ amount: 15, paymentStatus: "unpaid", createdAt: "2026-05-01T12:00:00.000Z" }),
+        order({ amount: 40, paymentStatus: "refunded", createdAt: "2026-05-02T12:00:00.000Z" }),
+        order({ amount: 5, status: "cancelled", createdAt: "2026-05-03T12:00:00.000Z" }),
+        order({ amount: 9, markAsTest: true, createdAt: "2026-05-04T12:00:00.000Z" }),
+      ],
+      "UTC",
+      NOW,
+    );
+    expect(mixed.qualifyingOrderCount).toBe(1);
+    expect(mixed.totalOrders).toBe(mixed.qualifyingOrderCount);
+    expect(mixed.lifetimeValue).toBe(15);
+    const excludedOnly = computeM06([order({ amount: 40, paymentStatus: "refunded" })], "UTC", NOW);
+    expect(excludedOnly.totalOrders).toBe(0);
+    expect(excludedOnly.qualifyingOrderCount).toBe(0);
+    expect(excludedOnly.lifecycleStage).toBe("NO QUALIFYING ORDERS");
   });
 
   it("rounds days overdue to two decimals and leaves the ratio empty without a typical interval", () => {
