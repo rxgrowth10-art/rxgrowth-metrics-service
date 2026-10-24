@@ -1,8 +1,8 @@
 -- Tenant registry for the customer metrics service.
 -- api_key_encrypted stores AES-256-GCM ciphertext (v1:iv:tag:ciphertext, base64 parts).
 -- The plaintext GoHighLevel private-integration token is never stored.
--- Apply with your Neon SQL runner, for example:
---   psql "$DATABASE_URL" -f migrations/001_tenants.sql
+-- Apply with the unpooled Neon URL:
+--   npm run db:migrate
 
 CREATE TABLE IF NOT EXISTS tenants (
   location_id TEXT PRIMARY KEY,

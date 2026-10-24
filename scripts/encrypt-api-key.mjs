@@ -1,9 +1,9 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-const rawKey = process.env.TENANT_ENCRYPTION_KEY;
+const rawKey = process.env.TENANT_KEY_ENCRYPTION_KEY;
 if (!rawKey || !rawKey.trim()) {
-  process.stderr.write("TENANT_ENCRYPTION_KEY is not set\n");
+  process.stderr.write("TENANT_KEY_ENCRYPTION_KEY is not set\n");
   process.exit(1);
 }
 
@@ -13,7 +13,7 @@ function parseKey(raw) {
     ? Buffer.from(trimmed, "hex")
     : Buffer.from(trimmed, "base64");
   if (key.length !== 32) {
-    throw new Error("TENANT_ENCRYPTION_KEY must decode to 32 bytes");
+    throw new Error("TENANT_KEY_ENCRYPTION_KEY must decode to 32 bytes");
   }
   return key;
 }

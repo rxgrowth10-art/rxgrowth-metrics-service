@@ -20,8 +20,8 @@ export interface AppDeps {
 }
 
 export function createDefaultDeps(env: NodeJS.ProcessEnv = process.env): AppDeps {
-  const keyRaw = env.TENANT_ENCRYPTION_KEY;
-  if (!keyRaw) throw new Error("TENANT_ENCRYPTION_KEY is not set");
+  const keyRaw = env.TENANT_KEY_ENCRYPTION_KEY;
+  if (!keyRaw) throw new Error("TENANT_KEY_ENCRYPTION_KEY is not set");
   const encryptionKey = parseEncryptionKey(keyRaw);
   const baseUrl = env.GHL_API_BASE_URL;
   return {

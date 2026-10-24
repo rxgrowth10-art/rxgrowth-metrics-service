@@ -37,7 +37,7 @@ describe("tenant API key encryption", () => {
     const result = spawnSync("node", ["scripts/encrypt-api-key.mjs"], {
       input: "pit-from-stdin",
       encoding: "utf8",
-      env: { ...process.env, TENANT_ENCRYPTION_KEY: KEY_B64 },
+      env: { ...process.env, TENANT_KEY_ENCRYPTION_KEY: KEY_B64 },
     });
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("pit-from-stdin");

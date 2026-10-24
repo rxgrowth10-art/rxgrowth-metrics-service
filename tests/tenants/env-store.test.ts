@@ -65,8 +65,10 @@ describe("env tenant store", () => {
 describe("TENANT_STORE selection", () => {
   it("uses the env store without DATABASE_URL and keeps Neon as the default", async () => {
     vi.stubEnv("TENANT_STORE", "env");
-    vi.stubEnv("TENANT_ENCRYPTION_KEY", Buffer.alloc(32, 9).toString("base64"));
+    vi.stubEnv("TENANT_KEY_ENCRYPTION_KEY", Buffer.alloc(32, 9).toString("base64"));
     vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("KV_REST_API_URL", "");
+    vi.stubEnv("KV_REST_API_TOKEN", "");
     vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
     vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
     vi.stubEnv(

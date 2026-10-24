@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryIdempotencyStore, createUpstashIdempotency } from "../../src/idempotency";
-import type { RedisSetNx } from "../../src/idempotency/upstash";
+import { redisRestCredentials, type RedisSetNx } from "../../src/idempotency/upstash";
 
 describe("memory idempotency", () => {
   it("sets once until the ttl expires", async () => {
@@ -62,8 +62,31 @@ describe("upstash idempotency", () => {
 describe("idempotency selection", () => {
   it("fails closed in production when Upstash is not configured", async () => {
     const { createIdempotencyStore } = await import("../../src/idempotency");
-    expect(() => createIdempotencyStore({ VERCEL_ENV: "production" })).toThrow(/UPSTASH_REDIS/);
+    expect(() => createIdempotencyStore({ VERCEL_ENV: "production" })).toThrow(/KV_REST_API/);
     const store = createIdempotencyStore({ VERCEL_ENV: "development" });
     expect(await store.setNx("evt:test", 10)).toBe(true);
+  });
+
+  it("prefers the KV REST pair and falls back to the Upstash pair", () => {
+    expect(
+      redisRestCredentials({
+        KV_REST_API_URL: " https://kv.example ",
+        KV_REST_API_TOKEN: " kv-token ",
+        UPSTASH_REDIS_REST_URL: "https://upstash.example",
+        UPSTASH_REDIS_REST_TOKEN: "upstash-token",
+      }),
+    ).toEqual({ url: "https://kv.example", token: "kv-token" });
+    expect(
+      redisRestCredentials({
+        UPSTASH_REDIS_REST_URL: "https://upstash.example",
+        UPSTASH_REDIS_REST_TOKEN: "upstash-token",
+      }),
+    ).toEqual({ url: "https://upstash.example", token: "upstash-token" });
+    expect(
+      redisRestCredentials({
+        KV_REST_API_URL: "https://kv.example",
+        UPSTASH_REDIS_REST_TOKEN: "upstash-token",
+      }),
+    ).toBeNull();
   });
 });

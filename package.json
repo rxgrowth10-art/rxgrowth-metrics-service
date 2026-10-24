@@ -9,6 +9,8 @@
   },
   "scripts": {
     "generate:fields": "node scripts/generate-fields.mjs",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:upsert-tenant": "node scripts/upsert-tenant.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

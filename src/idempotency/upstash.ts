@@ -27,6 +27,24 @@ export function createUpstashIdempotency(redis: RedisSetNx): IdempotencyStore {
   };
 }
 
-export function createUpstashIdempotencyFromEnv(): IdempotencyStore {
-  return createUpstashIdempotency(Redis.fromEnv() as unknown as RedisSetNx);
+export function redisRestCredentials(
+  env: NodeJS.ProcessEnv,
+): { url: string; token: string } | null {
+  const kvUrl = env.KV_REST_API_URL?.trim();
+  const kvToken = env.KV_REST_API_TOKEN?.trim();
+  if (kvUrl && kvToken) return { url: kvUrl, token: kvToken };
+  const upstashUrl = env.UPSTASH_REDIS_REST_URL?.trim();
+  const upstashToken = env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (upstashUrl && upstashToken) return { url: upstashUrl, token: upstashToken };
+  return null;
+}
+
+export function createUpstashIdempotencyFromEnv(env: NodeJS.ProcessEnv = process.env): IdempotencyStore {
+  const credentials = redisRestCredentials(env);
+  if (!credentials) {
+    throw new Error("KV_REST_API_URL and KV_REST_API_TOKEN are not set");
+  }
+  return createUpstashIdempotency(
+    new Redis({ url: credentials.url, token: credentials.token }) as unknown as RedisSetNx,
+  );
 }

@@ -10,7 +10,7 @@ This revision is the foundation: field contract, tenant store, GoHighLevel clien
 - `src/schema/fields.ts` — generated catalog of the RX Test Lab custom fields, keyed for runtime lookup. Test-lab ids are fixtures only.
 - `src/tenants/` — `TenantStore`. `TENANT_STORE=neon` uses Neon Postgres. `TENANT_STORE=env` loads one tenant from the environment for the test phase. API keys are AES-256-GCM ciphertext. Tests use the in-memory store.
 - `src/ghl/` — HTTP client. Timeout, retry with backoff on 429 and 5xx, per-location spacing, order pages via `offset`, contact search via `searchAfter`.
-- `src/idempotency/` — `SET NX` with TTL. Upstash Redis when configured, memory otherwise.
+- `src/idempotency/` — `SET NX` with TTL. Upstash Redis via `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or the `UPSTASH_REDIS_REST_*` pair when the KV pair is unset). Production fails closed. Other environments use memory when neither pair is set.
 - `src/time/business-date.ts` — tenant-timezone calendar dates.
 - `migrations/001_tenants.sql` — Neon schema.
 - `fixtures/test-lab-fields.json` — final custom-field snapshot for location `ekxOqjUKW7M6OV9XAVnx`.
@@ -27,23 +27,28 @@ Copy `.env.example` to `.env.local`. Values are names only; do not commit secret
 | Name | Required | Purpose |
 | --- | --- | --- |
 | `TENANT_STORE` | no | `neon` (default) or `env`. Selects where tenant records are loaded from. |
-| `DATABASE_URL` | when `TENANT_STORE=neon` | Neon Postgres connection string |
-| `TENANT_ENCRYPTION_KEY` | yes | 32-byte key, base64 or 64-char hex, for tenant API keys |
+| `DATABASE_URL` | when `TENANT_STORE=neon` | Pooled Neon Postgres URL. Runtime reads and writes use this. |
+| `DATABASE_URL_UNPOOLED` | migrations | Direct Neon URL. `npm run db:migrate` applies `migrations/*.sql` with this and nothing else. |
+| `TENANT_KEY_ENCRYPTION_KEY` | yes | 32-byte key, base64 or 64-char hex, for tenant API keys |
 | `TENANT_CONFIG` | `env` store, one of two forms | JSON object for the single test-phase tenant. When set, discrete `TENANT_*` fields below are ignored. |
 | `TENANT_LOCATION_ID` | `env` store, if `TENANT_CONFIG` is unset | Location id of the single tenant |
 | `TENANT_NAME` | no | Display name. Defaults to the location id. |
-| `TENANT_API_KEY` | `env` store, one key form | Plaintext GoHighLevel token. Encrypted in memory with `TENANT_ENCRYPTION_KEY`. Do not set this together with `TENANT_API_KEY_ENCRYPTED`. |
+| `TENANT_API_KEY` | `env` store, one key form | Plaintext GoHighLevel token. Encrypted in memory with `TENANT_KEY_ENCRYPTION_KEY`. Do not set this together with `TENANT_API_KEY_ENCRYPTED`. |
 | `TENANT_API_KEY_ENCRYPTED` | `env` store, the other key form | `v1:` ciphertext from `scripts/encrypt-api-key.mjs`. |
 | `TENANT_TIMEZONE` | no | IANA timezone. Defaults to `UTC`. |
 | `TENANT_CURRENCY` | no | Defaults to `USD`. Stored only; amounts are not rescaled. |
 | `TENANT_M10_WORKFLOW_ID` | no | Workflow id used when M10 enrollment is enabled. |
 | `TENANT_ACTIVE` | no | `false` or `0` disables the tenant. Defaults to active. |
 | `TENANT_WEBHOOK_TOKEN_HASH` | production webhook | SHA-256 hex of this tenant's webhook query token. Also accepted as `webhookTokenHash` inside `TENANT_CONFIG`. |
-| `UPSTASH_REDIS_REST_URL` | required when `VERCEL_ENV=production` | Upstash Redis REST URL. Production fails closed if this is unset. |
-| `UPSTASH_REDIS_REST_TOKEN` | required when `VERCEL_ENV=production` | Upstash Redis REST token. |
+| `KV_REST_API_URL` | required when `VERCEL_ENV=production` | Upstash Redis REST URL (Vercel KV name). Production fails closed when this pair is missing. |
+| `KV_REST_API_TOKEN` | required when `VERCEL_ENV=production` | Upstash Redis REST token (Vercel KV name). |
+| `UPSTASH_REDIS_REST_URL` | fallback | Used only together with `UPSTASH_REDIS_REST_TOKEN`, and only when the `KV_REST_API_*` pair is unset. |
+| `UPSTASH_REDIS_REST_TOKEN` | fallback | Pair with `UPSTASH_REDIS_REST_URL`. A URL from one pair and a token from the other are ignored. |
 | `CRON_SECRET` | yes, for the cron | Bearer token Vercel Cron sends |
 | `GHL_API_BASE_URL` | no | Defaults to `https://services.leadconnectorhq.com`. Version header is `2021-07-28`. |
 | `M10_ENROLL_ENABLED` | no | `true` enrolls newly eligible contacts into `m10_workflow_id`. Default off. |
+
+The Vercel Marketplace also injects `POSTGRES_URL`, `KV_URL`, `REDIS_URL`, and `KV_REST_API_READ_ONLY_TOKEN`. This service does not read those.
 
 Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, `secret`, bearer strings, and every query string. Do not log tenant API keys or webhook tokens.
 
@@ -53,29 +58,31 @@ Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, 
 
 ### Neon (`TENANT_STORE=neon`)
 
-1. Apply `migrations/001_tenants.sql` and `migrations/002_webhook_token.sql` to the Neon database.
-2. Encrypt the location's GoHighLevel private-integration token. The token is read from stdin and is not passed as an argument:
+1. Apply every file in `migrations/` with the unpooled URL. The script reads `DATABASE_URL_UNPOOLED` and does not use the pooled runtime URL:
 
 ```bash
-export TENANT_ENCRYPTION_KEY="base64-32-byte-key"
-printf '%s' "$GHL_TOKEN" | node scripts/encrypt-api-key.mjs
+npm run db:migrate
 ```
 
-3. Insert the ciphertext. `timezone` is an IANA name used for calendar-day math. `currency` is stored for the tenant and is not used to rescale order amounts. `m10_workflow_id` is optional until enrollment is turned on.
+2. Upsert a tenant. The GoHighLevel private-integration token is read from stdin and is not an argument. The script encrypts it with `TENANT_KEY_ENCRYPTION_KEY`, writes the ciphertext to `DATABASE_URL`, generates a webhook token, and stores only the SHA-256 hash. The token is printed once on stderr. stdout is `upserted LOCATION_ID` and does not include the token, the API key, or the ciphertext.
 
-```sql
-INSERT INTO tenants (
-  location_id, name, api_key_encrypted, timezone, currency, m10_workflow_id, webhook_token_hash, active
-) VALUES (
-  'LOCATION_ID',
-  'Restaurant name',
-  'v1:...',
-  'Africa/Cairo',
-  'EGP',
-  NULL,
-  'sha256-hex',
-  TRUE
-);
+```bash
+export TENANT_KEY_ENCRYPTION_KEY="base64-32-byte-key"
+export DATABASE_URL="postgres://pooled"
+export TENANT_LOCATION_ID="LOCATION_ID"
+export TENANT_NAME="Restaurant name"
+export TENANT_TIMEZONE="Africa/Cairo"
+export TENANT_CURRENCY="EGP"
+printf '%s' "$GHL_TOKEN" | npm run db:upsert-tenant
+```
+
+`timezone` is an IANA name used for calendar-day math. `currency` is stored for the tenant and is not used to rescale order amounts. `TENANT_M10_WORKFLOW_ID` is optional until enrollment is turned on. `TENANT_ACTIVE=false` stores an inactive row. Running the command again replaces that location's API key and webhook hash and prints a new token; the previous token stops matching.
+
+To encrypt a token without writing a row (for `TENANT_STORE=env`), keep using stdin:
+
+```bash
+export TENANT_KEY_ENCRYPTION_KEY="base64-32-byte-key"
+printf '%s' "$GHL_TOKEN" | node scripts/encrypt-api-key.mjs
 ```
 
 ### Environment (`TENANT_STORE=env`)
@@ -100,7 +107,7 @@ TENANT_M10_WORKFLOW_ID=
 TENANT_ACTIVE=true
 ```
 
-`apiKey` and `apiKeyEncrypted` are mutually exclusive. A plaintext `apiKey` is encrypted with `TENANT_ENCRYPTION_KEY` before the rest of the service sees it.
+`apiKey` and `apiKeyEncrypted` are mutually exclusive. A plaintext `apiKey` is encrypted with `TENANT_KEY_ENCRYPTION_KEY` before the rest of the service sees it.
 
 ## Webhook token
 

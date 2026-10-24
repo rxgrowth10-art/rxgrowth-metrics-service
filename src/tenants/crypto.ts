@@ -8,7 +8,7 @@ export function parseEncryptionKey(raw: string): Buffer {
     ? Buffer.from(trimmed, "hex")
     : Buffer.from(trimmed, "base64");
   if (key.length !== 32) {
-    throw new Error("TENANT_ENCRYPTION_KEY must decode to 32 bytes");
+    throw new Error("TENANT_KEY_ENCRYPTION_KEY must decode to 32 bytes");
   }
   return key;
 }
