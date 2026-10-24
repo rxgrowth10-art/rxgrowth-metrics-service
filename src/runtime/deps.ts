@@ -1,11 +1,11 @@
-import { createGhlClient, type GhlClient } from "../ghl";
-import { createIdempotencyStore, type IdempotencyStore } from "../idempotency";
+import { createGhlClient, type GhlClient } from "../ghl/index.js";
+import { createIdempotencyStore, type IdempotencyStore } from "../idempotency/index.js";
 import {
   createEnvTenantStore,
   createNeonTenantStore,
   parseEncryptionKey,
   type TenantStore,
-} from "../tenants";
+} from "../tenants/index.js";
 
 export interface AppDeps {
   tenants: TenantStore;

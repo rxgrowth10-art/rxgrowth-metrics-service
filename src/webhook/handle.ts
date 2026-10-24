@@ -1,12 +1,12 @@
-import type { GhlClient } from "../ghl";
-import { hydrateOrders } from "../ghl/hydrate-orders";
-import { applyLatestOrderDetail } from "../ghl/latest-order-detail";
-import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token";
-import { json } from "../http/json";
-import type { IdempotencyStore } from "../idempotency";
-import { log } from "../log/logger";
-import { decryptApiKey, type Tenant, type TenantStore } from "../tenants";
-import { writeM06Metrics } from "../writeback/m06";
+import type { GhlClient } from "../ghl/index.js";
+import { hydrateOrders } from "../ghl/hydrate-orders.js";
+import { applyLatestOrderDetail } from "../ghl/latest-order-detail.js";
+import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token.js";
+import { json } from "../http/json.js";
+import type { IdempotencyStore } from "../idempotency/index.js";
+import { log } from "../log/logger.js";
+import { decryptApiKey, type Tenant, type TenantStore } from "../tenants/index.js";
+import { writeM06Metrics } from "../writeback/m06.js";
 
 const EVENT_TTL_SECONDS = 300;
 const LOCK_TTL_SECONDS = 30;
@@ -20,8 +20,12 @@ export interface WebhookDeps {
   now: () => Date;
 }
 
+export function methodNotAllowed(): Response {
+  return json({ error: "method_not_allowed" }, 405, { Allow: "POST" });
+}
+
 export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Promise<Response> {
-  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  if (request.method !== "POST") return methodNotAllowed();
 
   let body: unknown;
   try {

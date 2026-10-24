@@ -1,4 +1,4 @@
-import type { GhlContact, GhlContactField, GhlCustomField, GhlOrder } from "./types";
+import type { GhlContact, GhlContactField, GhlCustomField, GhlOrder } from "./types.js";
 
 export interface ParsedOrderPage {
   orders: GhlOrder[];

@@ -1,7 +1,7 @@
-import { GhlRequestError } from "./errors";
-import { parseContact, parseContactPage, parseCustomFields, parseOrderPage, parseOrderResource } from "./parse";
-import { type Clock, LocationRateLimiter, sharedLimiter, systemClock } from "./rate-limit";
-import type { CustomFieldWrite, GhlClient, GhlContact, GhlCustomField, GhlOrder } from "./types";
+import { GhlRequestError } from "./errors.js";
+import { parseContact, parseContactPage, parseCustomFields, parseOrderPage, parseOrderResource } from "./parse.js";
+import { type Clock, LocationRateLimiter, sharedLimiter, systemClock } from "./rate-limit.js";
+import type { CustomFieldWrite, GhlClient, GhlContact, GhlCustomField, GhlOrder } from "./types.js";
 
 export const GHL_API_VERSION = "2021-07-28";
 export const GHL_API_BASE_URL = "https://services.leadconnectorhq.com";

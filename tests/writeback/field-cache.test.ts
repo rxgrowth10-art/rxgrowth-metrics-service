@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { GhlClient } from "../../src/ghl";
-import { GhlRequestError } from "../../src/ghl/errors";
-import { MemoryIdempotencyStore } from "../../src/idempotency";
-import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields";
+import type { GhlClient } from "../../src/ghl/index.js";
+import { GhlRequestError } from "../../src/ghl/errors.js";
+import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
+import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
 import {
   FIELD_CACHE_TTL_SECONDS,
   fieldCacheKey,
   invalidateFieldCache,
   isUnknownFieldError,
   loadFieldIdMap,
-} from "../../src/writeback/field-cache";
-import { writeM06Metrics } from "../../src/writeback/m06";
-import { order } from "../helpers/orders";
+} from "../../src/writeback/field-cache.js";
+import { writeM06Metrics } from "../../src/writeback/m06.js";
+import { order } from "../helpers/orders.js";
 
 describe("custom field id cache", () => {
   it("reuses the cached map for ten minutes and reloads after an unknown-field error", async () => {

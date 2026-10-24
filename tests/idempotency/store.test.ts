@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MemoryIdempotencyStore, createUpstashIdempotency } from "../../src/idempotency";
-import { redisRestCredentials, type RedisSetNx } from "../../src/idempotency/upstash";
+import { MemoryIdempotencyStore, createUpstashIdempotency } from "../../src/idempotency/index.js";
+import { redisRestCredentials, type RedisSetNx } from "../../src/idempotency/upstash.js";
 
 describe("memory idempotency", () => {
   it("sets once until the ttl expires", async () => {
@@ -61,7 +61,7 @@ describe("upstash idempotency", () => {
 
 describe("idempotency selection", () => {
   it("fails closed in production when Upstash is not configured", async () => {
-    const { createIdempotencyStore } = await import("../../src/idempotency");
+    const { createIdempotencyStore } = await import("../../src/idempotency/index.js");
     expect(() => createIdempotencyStore({ VERCEL_ENV: "production" })).toThrow(/KV_REST_API/);
     const store = createIdempotencyStore({ VERCEL_ENV: "development" });
     expect(await store.setNx("evt:test", 10)).toBe(true);

@@ -1,5 +1,5 @@
-import { round2 } from "./round";
-import type { MetricOrder } from "./types";
+import { round2 } from "./round.js";
+import type { MetricOrder } from "./types.js";
 
 export interface ValueSummary {
   lifetimeValue: number;

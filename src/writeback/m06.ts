@@ -1,12 +1,12 @@
-import type { GhlClient } from "../ghl";
-import type { IdempotencyStore } from "../idempotency";
-import { computeM06, type MetricOrder } from "../metrics";
-import { M06_WRITTEN_KEYS } from "../schema/fields";
-import { businessDateString } from "../time/business-date";
-import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap, refreshFieldIdMap } from "./field-cache";
-import { buildFieldIdMap, readContactField, requireFieldId } from "./fields";
-import { formatM06Values } from "./format";
-import { metricsHash } from "./hash";
+import type { GhlClient } from "../ghl/index.js";
+import type { IdempotencyStore } from "../idempotency/index.js";
+import { computeM06, type MetricOrder } from "../metrics/index.js";
+import { M06_WRITTEN_KEYS } from "../schema/fields.js";
+import { businessDateString } from "../time/business-date.js";
+import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap, refreshFieldIdMap } from "./field-cache.js";
+import { buildFieldIdMap, readContactField, requireFieldId } from "./fields.js";
+import { formatM06Values } from "./format.js";
+import { metricsHash } from "./hash.js";
 
 export interface WriteM06Result {
   written: boolean;

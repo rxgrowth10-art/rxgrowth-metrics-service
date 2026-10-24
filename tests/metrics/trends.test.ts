@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { calculateTrend, computeM06, frequencyBucket, summarizeValue } from "../../src/metrics";
-import { order } from "../helpers/orders";
+import { calculateTrend, computeM06, frequencyBucket, summarizeValue } from "../../src/metrics/index.js";
+import { order } from "../helpers/orders.js";
 
 describe("value, frequency, and trends", () => {
   it("sums qualifying amounts only and rounds money to two decimals", () => {

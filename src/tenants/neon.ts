@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import type { Tenant, TenantStore } from "./types";
+import type { Tenant, TenantStore } from "./types.js";
 
 export function createNeonTenantStore(databaseUrl: string): TenantStore {
   const sql = neon(databaseUrl);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { computeM06, customerStatus, lifecycleStage } from "../../src/metrics";
-import { addCalendarDays } from "../../src/time/business-date";
-import { order } from "../helpers/orders";
+import { computeM06, customerStatus, lifecycleStage } from "../../src/metrics/index.js";
+import { addCalendarDays } from "../../src/time/business-date.js";
+import { order } from "../helpers/orders.js";
 
 const TODAY = "2026-06-01";
 const NOW = new Date(`${TODAY}T12:00:00.000Z`);

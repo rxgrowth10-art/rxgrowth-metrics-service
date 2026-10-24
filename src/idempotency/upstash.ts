@@ -1,5 +1,5 @@
 import { Redis } from "@upstash/redis";
-import type { IdempotencyStore } from "./types";
+import type { IdempotencyStore } from "./types.js";
 
 export interface RedisSetNx {
   set(key: string, value: string, options: { nx?: true; ex: number }): Promise<string | null>;

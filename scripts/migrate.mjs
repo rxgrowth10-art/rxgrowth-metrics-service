@@ -1,7 +1,10 @@
 import { readdir, readFile } from "node:fs/promises";
+import { register } from "node:module";
 import { pathToFileURL } from "node:url";
 import { neon } from "@neondatabase/serverless";
-import { statementsFromSql } from "../src/admin/sql.ts";
+
+register(new URL("./resolve-typescript.mjs", import.meta.url));
+const { statementsFromSql } = await import("../src/admin/sql.js");
 
 function redact(message, secret) {
   const withoutUrls = message.replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted]");

@@ -2,9 +2,9 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { statementsFromSql } from "../../src/admin/sql";
-import { tenantUpsertPlan } from "../../src/admin/upsert-tenant";
-import { decryptApiKey, parseEncryptionKey } from "../../src/tenants/crypto";
+import { statementsFromSql } from "../../src/admin/sql.js";
+import { tenantUpsertPlan } from "../../src/admin/upsert-tenant.js";
+import { decryptApiKey, parseEncryptionKey } from "../../src/tenants/crypto.js";
 
 const KEY_B64 = Buffer.alloc(32, 7).toString("base64");
 

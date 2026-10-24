@@ -1,5 +1,5 @@
-import { encryptApiKey } from "./crypto";
-import type { Tenant, TenantStore } from "./types";
+import { encryptApiKey } from "./crypto.js";
+import type { Tenant, TenantStore } from "./types.js";
 
 interface TenantInput {
   locationId: string;

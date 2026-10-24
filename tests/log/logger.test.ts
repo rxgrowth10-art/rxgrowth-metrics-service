@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { log, redact } from "../../src/log/logger";
+import { log, redact } from "../../src/log/logger.js";
 
 afterEach(() => {
   vi.restoreAllMocks();

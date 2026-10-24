@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseContactPage } from "../../src/ghl/parse";
-import { parseStoredDate } from "../../src/time/business-date";
+import { parseContactPage } from "../../src/ghl/parse.js";
+import { parseStoredDate } from "../../src/time/business-date.js";
 
 const LAST_ORDER_DATE_ID = "WUgA196HILTt2ul6vfqf";
 

@@ -1,7 +1,7 @@
-import { businessDateString, calendarDayDifference } from "../time/business-date";
-import { orderInstant } from "./qualifying";
-import { median, mean, round2 } from "./round";
-import type { MetricOrder } from "./types";
+import { businessDateString, calendarDayDifference } from "../time/business-date.js";
+import { orderInstant } from "./qualifying.js";
+import { median, mean, round2 } from "./round.js";
+import type { MetricOrder } from "./types.js";
 
 export function orderIntervalsDays(orders: readonly MetricOrder[], timeZone: string): number[] {
   const days = new Set<string>();

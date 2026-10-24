@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { applyLatestOrderDetail, MAX_LATEST_ORDER_DETAIL_CALLS } from "../../src/ghl/latest-order-detail";
-import { parseOrderResource } from "../../src/ghl/parse";
-import type { GhlOrder } from "../../src/ghl/types";
-import { computeM06 } from "../../src/metrics";
-import { metricsHash } from "../../src/writeback/hash";
-import { coerceLastOrderType, formatM06Values } from "../../src/writeback/format";
-import { order } from "../helpers/orders";
+import { applyLatestOrderDetail, MAX_LATEST_ORDER_DETAIL_CALLS } from "../../src/ghl/latest-order-detail.js";
+import { parseOrderResource } from "../../src/ghl/parse.js";
+import type { GhlOrder } from "../../src/ghl/types.js";
+import { computeM06 } from "../../src/metrics/index.js";
+import { metricsHash } from "../../src/writeback/hash.js";
+import { coerceLastOrderType, formatM06Values } from "../../src/writeback/format.js";
+import { order } from "../helpers/orders.js";
 
 const NOW = new Date("2026-10-24T12:00:00.000Z");
 

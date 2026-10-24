@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { CustomFieldWrite, GhlClient, GhlContact } from "../../src/ghl";
-import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields";
-import { coerceLastOrderType } from "../../src/writeback/format";
-import { metricsHash } from "../../src/writeback/hash";
-import { writeM06Metrics } from "../../src/writeback/m06";
-import { order } from "../helpers/orders";
+import type { CustomFieldWrite, GhlClient, GhlContact } from "../../src/ghl/index.js";
+import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
+import { coerceLastOrderType } from "../../src/writeback/format.js";
+import { metricsHash } from "../../src/writeback/hash.js";
+import { writeM06Metrics } from "../../src/writeback/m06.js";
+import { order } from "../helpers/orders.js";
 
 function fieldCatalog() {
   return M06_WRITTEN_KEYS.map((key) => {

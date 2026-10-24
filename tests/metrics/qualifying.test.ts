@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isQualifyingOrder } from "../../src/metrics";
-import { order } from "../helpers/orders";
+import { isQualifyingOrder } from "../../src/metrics/index.js";
+import { order } from "../helpers/orders.js";
 
 describe("qualifying orders", () => {
   it("accepts paid, COD unpaid, and partially paid orders", () => {

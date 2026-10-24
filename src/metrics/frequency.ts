@@ -1,6 +1,6 @@
-import { businessDateString } from "../time/business-date";
-import { orderInstant } from "./qualifying";
-import type { MetricOrder } from "./types";
+import { businessDateString } from "../time/business-date.js";
+import { orderInstant } from "./qualifying.js";
+import type { MetricOrder } from "./types.js";
 
 export function trailing12MonthOrderCount(
   orders: readonly MetricOrder[],

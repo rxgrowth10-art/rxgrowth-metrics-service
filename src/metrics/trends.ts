@@ -1,4 +1,4 @@
-import type { Trend } from "./types";
+import type { Trend } from "./types.js";
 
 export function calculateTrend(
   recentValue: number,

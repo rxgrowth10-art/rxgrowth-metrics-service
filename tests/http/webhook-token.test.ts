@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashWebhookToken, readWebhookToken, webhookTokenMatches } from "../../src/http/webhook-token";
+import { hashWebhookToken, readWebhookToken, webhookTokenMatches } from "../../src/http/webhook-token.js";
 
 describe("webhook query token", () => {
   it("matches a sha256 hash in constant time and ignores a missing token", () => {

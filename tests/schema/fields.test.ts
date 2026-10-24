@@ -9,7 +9,7 @@ import {
   TEST_LAB_LOCATION_ID,
   WORKFLOW_OWNED_KEYS,
   fieldByKey,
-} from "../../src/schema/fields";
+} from "../../src/schema/fields.js";
 
 const fixture = JSON.parse(readFileSync(new URL("../../fixtures/test-lab-fields.json", import.meta.url), "utf8")) as Array<{
   id: string;

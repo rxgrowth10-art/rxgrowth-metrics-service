@@ -1,4 +1,4 @@
-import type { GhlContact } from "../ghl";
+import type { GhlContact } from "../ghl/index.js";
 
 export function buildFieldIdMap(fields: readonly { id: string; fieldKey: string }[]): Map<string, string> {
   const map = new Map<string, string>();

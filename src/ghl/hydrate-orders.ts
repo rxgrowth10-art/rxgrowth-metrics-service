@@ -1,4 +1,4 @@
-import type { GhlOrder } from "./types";
+import type { GhlOrder } from "./types.js";
 
 export const ORDER_DETAIL_CONCURRENCY = 4;
 

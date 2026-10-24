@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.esm-check/
+.esm-check-*/
 coverage/
 .env
 .env.local

@@ -1,6 +1,6 @@
-import { log } from "../log/logger";
-import { isQualifyingOrder, orderInstant } from "../metrics/qualifying";
-import type { GhlOrder } from "./types";
+import { log } from "../log/logger.js";
+import { isQualifyingOrder, orderInstant } from "../metrics/qualifying.js";
+import type { GhlOrder } from "./types.js";
 
 /** Detail reads for markAsTest fallback. The happy path uses one call. */
 export const MAX_LATEST_ORDER_DETAIL_CALLS = 3;
