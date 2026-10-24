@@ -178,4 +178,4 @@ npm run typecheck
 npm run lint
 ```
 
-Node.js 22 or newer. Tests use mocked `fetch`, in-memory stores, and the test-lab fixture. They do not call GoHighLevel, Neon, or Upstash.
+Node.js 22.18 or newer. Tests use mocked `fetch`, in-memory stores, and the test-lab fixture. They do not call GoHighLevel, Neon, or Upstash.
