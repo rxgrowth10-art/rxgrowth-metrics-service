@@ -319,7 +319,9 @@ describe("POST /api/webhooks/ghl", () => {
 
   it("reports misconfiguration instead of calling GoHighLevel", async () => {
     vi.stubEnv("DATABASE_URL", "");
-    vi.stubEnv("TENANT_ENCRYPTION_KEY", "");
+    vi.stubEnv("TENANT_KEY_ENCRYPTION_KEY", "");
+    vi.stubEnv("KV_REST_API_URL", "");
+    vi.stubEnv("KV_REST_API_TOKEN", "");
     const response = await POST(post({ locationId: "loc_1", contactId: "c" }));
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "misconfigured" });
