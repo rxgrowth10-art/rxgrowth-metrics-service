@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "_id": "order_status_refunded",
+      "altId": "loc_test",
+      "altType": "location",
+      "contactId": "contact_sample",
+      "currency": "EGP",
+      "amount": 40,
+      "status": "refunded",
+      "paymentStatus": "paid",
+      "liveMode": true,
+      "fulfillmentStatus": "unfulfilled",
+      "sourceType": "website",
+      "sourceSubType": "store",
+      "createdAt": "2026-02-01T12:00:00.000Z",
+      "updatedAt": "2026-06-22T01:00:00.000Z"
+    }
+  ],
+  "totalCount": 1
+}

@@ -73,6 +73,7 @@ describe("TENANT_STORE selection", () => {
     vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
     vi.stubEnv("M06_RECONCILE_HOURS", "24");
     vi.stubEnv("M06_RECONCILE_MAX_PAGES", "10");
+    vi.stubEnv("M06_FULL_RECONCILE_WEEKDAY", "Monday");
     vi.stubEnv(
       "TENANT_CONFIG",
       JSON.stringify({ locationId: "loc_env", name: "Env Lab", apiKey: "pit-env", timezone: "UTC" }),
@@ -80,6 +81,7 @@ describe("TENANT_STORE selection", () => {
     const deps = createDefaultDeps();
     expect(deps.reconcileHours).toBe(24);
     expect(deps.reconcilePageCap).toBe(10);
+    expect(deps.fullReconcileWeekday).toBe("monday");
     const tenant = await deps.tenants.getByLocationId("loc_env");
     expect(tenant?.currency).toBe("USD");
     expect(decryptApiKey(tenant?.apiKeyEncrypted ?? "", deps.encryptionKey)).toBe("pit-env");

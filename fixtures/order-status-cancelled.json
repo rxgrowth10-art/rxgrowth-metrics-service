@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "_id": "order_status_cancelled",
+      "altId": "loc_test",
+      "altType": "location",
+      "contactId": "contact_sample",
+      "currency": "EGP",
+      "amount": 50,
+      "status": "cancelled",
+      "paymentStatus": "paid",
+      "liveMode": true,
+      "fulfillmentStatus": "unfulfilled",
+      "sourceType": "website",
+      "sourceSubType": "store",
+      "createdAt": "2026-01-15T12:00:00.000Z",
+      "updatedAt": "2026-06-22T00:00:00.000Z"
+    }
+  ],
+  "totalCount": 1
+}

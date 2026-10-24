@@ -1,7 +1,15 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { runM10Tenant, type M10Deps } from "../../src/cron/m10.js";
-import { orderTouchesWindow, readReconcileHours, readReconcileMaxPages } from "../../src/cron/reconcile.js";
+import {
+  isFullReconcileDay,
+  orderTouchesWindow,
+  readFullReconcileWeekday,
+  readReconcileHours,
+  readReconcileMaxPages,
+} from "../../src/cron/reconcile.js";
 import type { CustomFieldWrite, GhlClient, GhlContact, GhlOrder, GhlOrderPage } from "../../src/ghl/index.js";
+import { parseOrderPage } from "../../src/ghl/parse.js";
 import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
 import { computeM06 } from "../../src/metrics/index.js";
 import { FIELDS, fieldByKey } from "../../src/schema/fields.js";
@@ -15,17 +23,24 @@ const NOW = new Date("2026-06-22T12:00:00.000Z");
 const IN_WINDOW = "2026-06-22T00:00:00.000Z";
 const OUTSIDE = "2026-06-20T10:00:00.000Z";
 
-function tenant(): Tenant {
+function tenant(timezone = "UTC"): Tenant {
   return {
     locationId: "loc_1",
     name: "Test Lab",
     apiKeyEncrypted: encryptApiKey("pit-plaintext", KEY),
-    timezone: "UTC",
+    timezone,
     currency: "EGP",
     m10WorkflowId: "wf_m10",
     webhookTokenHash: null,
     active: true,
   };
+}
+
+function fixtureOrder(name: string): GhlOrder {
+  const body = JSON.parse(readFileSync(new URL(`../../fixtures/${name}.json`, import.meta.url), "utf8")) as unknown;
+  const parsed = parseOrderPage(body).orders[0];
+  if (!parsed) throw new Error(name);
+  return parsed;
 }
 
 function contact(id: string, values: Record<string, string>): GhlContact {
@@ -51,6 +66,10 @@ function harness(options?: {
   budgetMs?: number;
   reconcileHours?: number;
   reconcilePageCap?: number;
+  fullReconcileWeekday?: string;
+  fullReconcilePageCap?: number;
+  now?: Date;
+  timezone?: string;
 }) {
   const tenants = new MemoryTenantStore();
   const listed: string[] = [];
@@ -106,19 +125,22 @@ function harness(options?: {
     cronSecret: "cron-secret",
     enrollEnabled: false,
     ghlFactory: () => ghl,
-    now: () => NOW,
+    now: () => options?.now ?? NOW,
     ...(options?.budgetMs !== undefined ? { budgetMs: options.budgetMs } : {}),
     ...(options?.reconcileHours !== undefined ? { reconcileHours: options.reconcileHours } : {}),
     ...(options?.reconcilePageCap !== undefined ? { reconcilePageCap: options.reconcilePageCap } : {}),
+    ...(options?.fullReconcileWeekday !== undefined ? { fullReconcileWeekday: options.fullReconcileWeekday } : {}),
+    ...(options?.fullReconcilePageCap !== undefined ? { fullReconcilePageCap: options.fullReconcilePageCap } : {}),
   };
   return { deps, tenants, listed, updates, searches: () => searches };
 }
 
 async function run(options?: Parameters<typeof harness>[0]) {
   const built = harness(options);
-  await built.tenants.upsert(tenant());
-  const result = await runM10Tenant(built.deps, tenant());
-  return { ...built, result };
+  const location = tenant(options?.timezone);
+  await built.tenants.upsert(location);
+  const result = await runM10Tenant(built.deps, location);
+  return { ...built, result, location };
 }
 
 describe("readReconcileHours", () => {
@@ -139,6 +161,27 @@ describe("readReconcileMaxPages", () => {
     expect(readReconcileMaxPages({ M06_RECONCILE_MAX_PAGES: "1.5" })).toBe(30);
     expect(readReconcileMaxPages({ M06_RECONCILE_MAX_PAGES: "nope" })).toBe(30);
     expect(readReconcileMaxPages({ M06_RECONCILE_MAX_PAGES: "10" })).toBe(10);
+  });
+});
+
+describe("readFullReconcileWeekday", () => {
+  it("defaults to Friday when the env value is missing or not a weekday name", () => {
+    expect(readFullReconcileWeekday({})).toBe("friday");
+    expect(readFullReconcileWeekday({ M06_FULL_RECONCILE_WEEKDAY: "" })).toBe("friday");
+    expect(readFullReconcileWeekday({ M06_FULL_RECONCILE_WEEKDAY: "Fri" })).toBe("friday");
+    expect(readFullReconcileWeekday({ M06_FULL_RECONCILE_WEEKDAY: "Monday" })).toBe("monday");
+  });
+});
+
+describe("full reconcile weekday", () => {
+  const fridayUtc = new Date("2026-06-26T03:00:00.000Z");
+
+  it("uses the tenant timezone, so 03:00 UTC Friday is still Thursday in Chicago", () => {
+    expect(isFullReconcileDay(fridayUtc, "UTC", "friday")).toBe(true);
+    expect(isFullReconcileDay(fridayUtc, "Africa/Cairo", "friday")).toBe(true);
+    expect(isFullReconcileDay(fridayUtc, "America/Chicago", "friday")).toBe(false);
+    expect(isFullReconcileDay(new Date("2026-06-27T03:00:00.000Z"), "America/Chicago", "friday")).toBe(true);
+    expect(isFullReconcileDay(NOW, "UTC", "friday")).toBe(false);
   });
 });
 
@@ -377,6 +420,152 @@ describe("M06 order reconcile", () => {
       warn.mockRestore();
       info.mockRestore();
       error.mockRestore();
+    }
+  });
+
+  it("drops LTV and count when a qualifying order flips to cancelled or refunded inside the window", async () => {
+    const cancelled = fixtureOrder("order-status-cancelled");
+    const statusRefunded = fixtureOrder("order-status-refunded");
+    const paymentRefunded = fixtureOrder("order-payment-refunded");
+    const kept = order({ id: "keep", contactId: "contact_sample", amount: 100, createdAt: "2026-01-01T12:00:00.000Z" });
+    const { updates, listed } = await run({
+      pages: () => ({ orders: [cancelled, statusRefunded, paymentRefunded], totalCount: 3 }),
+      contactOrders: () => [cancelled, statusRefunded, paymentRefunded, kept],
+      contacts: [
+        contact("contact_sample", {
+          qualifying_order_count: "4",
+          last_order_date: "2026-03-01",
+          typical_order_interval_days: "14",
+        }),
+      ],
+    });
+    const metrics = updates.find((update) => update.fields.some((field) => field.key === "lifetime_value"));
+    expect(valueOf(metrics?.fields, "lifetime_value")).toBe("100.00");
+    expect(valueOf(metrics?.fields, "qualifying_order_count")).toBe("1");
+    expect(listed).toEqual(["contact_sample"]);
+  });
+
+  it("ignores an old cancelled order until the tenant-local full-reconcile weekday", async () => {
+    const old = order({
+      id: "old-cancel",
+      contactId: "c1",
+      status: "cancelled",
+      amount: 50,
+      paymentStatus: "paid",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+    const pages = () => ({ orders: [old], totalCount: 1 });
+    const contactOrders = () => [old, order({ id: "keep", contactId: "c1", amount: 80, createdAt: "2026-01-03T00:00:00.000Z" })];
+    const monday = await run({ pages, contactOrders });
+    expect(monday.listed).toEqual([]);
+    expect(await monday.deps.idempotency.get("m06full:loc_1:2026-06-22")).toBeNull();
+
+    const friday = new Date("2026-06-26T03:00:00.000Z");
+    const utc = await run({ pages, contactOrders, now: friday, timezone: "UTC" });
+    expect(utc.listed).toEqual(["c1"]);
+    expect(utc.result.summary.reconciled).toBe(1);
+    expect(JSON.parse((await utc.deps.idempotency.get("m06full:loc_1:2026-06-26")) ?? "null")).toMatchObject({ done: true });
+    expect(await utc.deps.idempotency.get("m06reconcile:loc_1:2026-06-26")).toBeNull();
+
+    const chicago = await run({ pages, contactOrders, now: friday, timezone: "America/Chicago" });
+    expect(chicago.listed).toEqual([]);
+    expect(await chicago.deps.idempotency.get("m06full:loc_1:2026-06-25")).toBeNull();
+  });
+
+  it("continues a full reconcile across hops on m06full and still recomputes old orders", async () => {
+    const friday = new Date("2026-06-26T12:00:00.000Z");
+    const first = await run({
+      now: friday,
+      budgetMs: 0,
+      pages: (offset) => {
+        if (offset === 0) {
+          return {
+            orders: [
+              order({
+                id: "a",
+                contactId: "a",
+                status: "cancelled",
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+              }),
+            ],
+            totalCount: 2,
+          };
+        }
+        return {
+          orders: [
+            order({
+              id: "b",
+              contactId: "b",
+              status: "refunded",
+              paymentStatus: "paid",
+              createdAt: "2026-02-01T00:00:00.000Z",
+              updatedAt: "2026-02-01T00:00:00.000Z",
+            }),
+          ],
+          totalCount: 2,
+        };
+      },
+      contactOrders: (contactId) => [
+        order({ id: `qual-${contactId}`, contactId, amount: 15, createdAt: "2025-01-01T00:00:00.000Z" }),
+      ],
+    });
+    expect(first.result.continue).toBe(true);
+    expect(first.result.summary.reconciled).toBe(1);
+    expect(first.searches()).toBe(0);
+    expect(first.listed).toEqual(["a"]);
+    expect(await first.deps.idempotency.get("m06full:loc_1:2026-06-26")).toBe(
+      JSON.stringify({ offset: 1, seen: ["a"] }),
+    );
+    expect(await first.deps.idempotency.get("m06reconcile:loc_1:2026-06-26")).toBeNull();
+
+    const second = await runM10Tenant(first.deps, first.location);
+    expect(second.continue).toBe(false);
+    expect(second.summary.reconciled).toBe(1);
+    expect(first.listed).toEqual(["a", "b"]);
+    expect(first.searches()).toBe(1);
+    expect(JSON.parse((await first.deps.idempotency.get("m06full:loc_1:2026-06-26")) ?? "null")).toMatchObject({
+      done: true,
+    });
+  });
+
+  it("warns and stops a full reconcile at the safety page cap", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { listed, searches } = await run({
+        now: new Date("2026-06-26T12:00:00.000Z"),
+        fullReconcilePageCap: 1,
+        reconcilePageCap: 30,
+        pages: (offset) => ({
+          orders: [
+            order({
+              id: `p${offset}`,
+              contactId: `c${offset}`,
+              status: "cancelled",
+              createdAt: "2025-06-01T00:00:00.000Z",
+              updatedAt: "2025-06-01T00:00:00.000Z",
+            }),
+          ],
+          totalCount: 100000,
+        }),
+        contactOrders: (contactId) => [
+          order({ id: `qual-${contactId}`, contactId, amount: 10, createdAt: "2025-01-01T00:00:00.000Z" }),
+        ],
+      });
+      expect(listed).toEqual(["c0"]);
+      expect(searches()).toBe(1);
+      const cap = warn.mock.calls
+        .map((call) => JSON.parse(String(call[0])) as { event?: string; data?: Record<string, unknown> })
+        .find((line) => line.event === "m06.reconcile_cap");
+      expect(cap?.data).toMatchObject({
+        locationId: "loc_1",
+        pages: 1,
+        lastCreatedAt: "2025-06-01T00:00:00.000Z",
+        full: true,
+      });
+    } finally {
+      warn.mockRestore();
     }
   });
 });

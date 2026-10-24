@@ -8,6 +8,10 @@ import type { M10Deps, M10Summary } from "./m10.js";
 
 export const DEFAULT_RECONCILE_HOURS = 48;
 export const MAX_RECONCILE_PAGES = 30;
+export const DEFAULT_FULL_RECONCILE_WEEKDAY = "friday";
+/** Safety stop for the weekly scan. 500 pages at limit 100 is 50,000 orders. */
+export const FULL_RECONCILE_PAGE_CAP = 500;
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
 const RECONCILE_DONE_TTL_SECONDS = 60 * 60 * 36;
 const RECONCILE_CURSOR_TTL_SECONDS = 60 * 60 * 2;
 
@@ -33,6 +37,26 @@ export function readReconcileMaxPages(env: NodeJS.ProcessEnv): number {
   return value;
 }
 
+export function readFullReconcileWeekday(env: NodeJS.ProcessEnv): string {
+  const raw = env.M06_FULL_RECONCILE_WEEKDAY?.trim().toLowerCase();
+  if (!raw) return DEFAULT_FULL_RECONCILE_WEEKDAY;
+  if ((WEEKDAYS as readonly string[]).includes(raw)) return raw;
+  return DEFAULT_FULL_RECONCILE_WEEKDAY;
+}
+
+export function tenantWeekday(now: Date, timeZone: string): string | null {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long" }).format(now).toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+export function isFullReconcileDay(now: Date, timeZone: string, weekday: string): boolean {
+  const local = tenantWeekday(now, timeZone);
+  return local !== null && local === weekday.trim().toLowerCase();
+}
+
 export function orderTouchesWindow(order: { updatedAt?: string | null; createdAt?: string | null }, now: Date, hours: number): boolean {
   const instant = parseInstant(order.updatedAt) ?? parseInstant(order.createdAt);
   if (!instant) return false;
@@ -47,8 +71,10 @@ export function orderTouchesWindow(order: { updatedAt?: string | null; createdAt
  *
  * The list is newest-first by createdAt, not updatedAt. startAt/endAt select
  * whole createdAt days in the location timezone, so they miss a recent update
- * on an older order. The scan keeps offset order, limit 100, and the updatedAt
- * filter, and stops after the page cap.
+ * on an older order. The daily scan keeps offset order, limit 100, and the
+ * updatedAt filter, and stops after the page cap. On the configured weekday in
+ * the tenant timezone the same hop scans every contact instead, up to the
+ * safety page cap, and stores progress on `m06full`.
  */
 export async function reconcileRecentOrders(args: {
   client: GhlClient;
@@ -61,11 +87,17 @@ export async function reconcileRecentOrders(args: {
   summary: M10Summary;
   fresh: Map<string, Record<string, string>>;
 }): Promise<boolean> {
-  const key = reconcileKey(args.tenant.locationId, args.day);
+  const weekday = args.deps.fullReconcileWeekday ?? DEFAULT_FULL_RECONCILE_WEEKDAY;
+  const full = isFullReconcileDay(args.deps.now(), args.tenant.timezone, weekday);
+  const key = full
+    ? fullReconcileKey(args.tenant.locationId, args.day)
+    : reconcileKey(args.tenant.locationId, args.day);
   const existing = await readReconcileCursor(args.idempotency, key);
   if (existing?.done) return false;
   const hours = args.deps.reconcileHours ?? DEFAULT_RECONCILE_HOURS;
-  const cap = args.deps.reconcilePageCap ?? MAX_RECONCILE_PAGES;
+  const cap = full
+    ? (args.deps.fullReconcilePageCap ?? FULL_RECONCILE_PAGE_CAP)
+    : (args.deps.reconcilePageCap ?? MAX_RECONCILE_PAGES);
   let offset = existing?.offset ?? 0;
   const seen = new Set(existing?.seen ?? []);
   let pages = 0;
@@ -77,7 +109,7 @@ export async function reconcileRecentOrders(args: {
     let progressed = false;
     for (let index = 0; index < page.orders.length; index += 1) {
       const order = page.orders[index];
-      if (order && needsReconcile(order, now(), hours, seen)) {
+      if (order && needsReconcile(order, now(), hours, seen, full)) {
         seen.add(order.contactId);
         const result = await runLockedM06({
           client: args.client,
@@ -94,7 +126,7 @@ export async function reconcileRecentOrders(args: {
         progressed = true;
       }
       if (!progressed || !overBudget()) continue;
-      if (pendingLater(page.orders, index + 1, now(), hours, seen)) {
+      if (pendingLater(page.orders, index + 1, now(), hours, seen, full)) {
         await saveCursor(args.idempotency, key, { offset, seen: [...seen] });
         return true;
       }
@@ -111,6 +143,7 @@ export async function reconcileRecentOrders(args: {
         reconciled: args.summary.reconciled,
         unchanged: args.summary.reconcileUnchanged,
         pages,
+        full,
       });
       return false;
     }
@@ -122,6 +155,7 @@ export async function reconcileRecentOrders(args: {
         cap,
         offset: nextOffset,
         lastCreatedAt: last?.createdAt ?? null,
+        full,
       });
       await args.idempotency.set(key, JSON.stringify({ done: true }), RECONCILE_DONE_TTL_SECONDS);
       return false;
@@ -140,8 +174,11 @@ function needsReconcile(
   now: Date,
   hours: number,
   seen: ReadonlySet<string>,
+  full: boolean,
 ): order is GhlOrder & { contactId: string } {
-  return Boolean(order.contactId) && orderTouchesWindow(order, now, hours) && !seen.has(order.contactId ?? "");
+  if (!order.contactId || seen.has(order.contactId)) return false;
+  if (full) return true;
+  return orderTouchesWindow(order, now, hours);
 }
 
 function pendingLater(
@@ -150,16 +187,21 @@ function pendingLater(
   now: Date,
   hours: number,
   seen: ReadonlySet<string>,
+  full: boolean,
 ): boolean {
   for (let index = start; index < orders.length; index += 1) {
     const order = orders[index];
-    if (order && needsReconcile(order, now, hours, seen)) return true;
+    if (order && needsReconcile(order, now, hours, seen, full)) return true;
   }
   return false;
 }
 
 function reconcileKey(locationId: string, day: string): string {
   return `m06reconcile:${locationId}:${day}`;
+}
+
+function fullReconcileKey(locationId: string, day: string): string {
+  return `m06full:${locationId}:${day}`;
 }
 
 async function readReconcileCursor(store: IdempotencyStore, key: string): Promise<ReconcileCursor | null> {

@@ -32,6 +32,10 @@ export interface M10Deps {
   reconcileHours?: number;
   /** Location-order pages to scan. Default 30, from M06_RECONCILE_MAX_PAGES. */
   reconcilePageCap?: number;
+  /** Tenant-local weekday for the full order scan. Default friday. */
+  fullReconcileWeekday?: string;
+  /** Safety page cap for the weekly scan. Default 500. */
+  fullReconcilePageCap?: number;
   /**
    * When set, the dispatcher asks this function to run each active tenant
    * instead of walking them inside the cron invocation.
