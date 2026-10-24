@@ -18,7 +18,7 @@ const WEBHOOK_HASH = hashWebhookToken(WEBHOOK_TOKEN);
 
 function tenant(overrides: Partial<Tenant> = {}): Tenant {
   return {
-    locationId: "loc_1",
+    locationId: "loc1",
     name: "Test Lab",
     apiKeyEncrypted: encryptApiKey("pit-plaintext", KEY),
     timezone: "UTC",
@@ -65,7 +65,7 @@ function deps(options?: {
     },
     async getContact() {
       return {
-        id: "contact_1",
+        id: "contact1",
         customFields: storedHash ? [{ id: hashId, key: "metrics_hash", value: storedHash }] : [],
       };
     },
@@ -130,8 +130,8 @@ describe("GHL webhook", () => {
     });
     await harness.tenants.upsert(tenant());
     const payload = {
-      locationId: "loc_1",
-      contactId: "contact_1",
+      locationId: "loc1",
+      contactId: "contact1",
       amount: 999999,
       orders: [{ amount: 1, paymentStatus: "paid", liveMode: true }],
       lifetimeValue: 1,
@@ -143,7 +143,7 @@ describe("GHL webhook", () => {
     expect(second.status).toBe(202);
     expect(await second.json()).toEqual({ accepted: true, written: false });
     expect(harness.listCalls()).toBe(2);
-    expect(harness.seenKeys).toEqual(["loc_1:pit-plaintext", "loc_1:pit-plaintext"]);
+    expect(harness.seenKeys).toEqual(["loc1:pit-plaintext", "loc1:pit-plaintext"]);
     expect(Object.keys(harness.updates[0] ?? {})).toEqual([...M06_WRITTEN_KEYS]);
     expect(harness.updates[0]?.lifetime_value).toBe("15.00");
     expect(harness.updates[0]?.total_orders).toBe("1");
@@ -155,16 +155,16 @@ describe("GHL webhook", () => {
     const harness = deps();
     await harness.tenants.upsert(tenant());
     const badToken = await handleGhlWebhook(
-      postUrl({ locationId: "loc_1", contactId: "contact_1" }, "https://example.test/api/webhooks/ghl?t=wrong"),
+      postUrl({ locationId: "loc1", contactId: "contact1" }, "https://example.test/api/webhooks/ghl?t=wrong"),
       harness.deps,
     );
     const unknown = await handleGhlWebhook(
-      post({ locationId: "missing", contactId: "contact_1" }),
+      post({ locationId: "missing", contactId: "contact1" }),
       harness.deps,
     );
     await harness.tenants.upsert(tenant({ active: false }));
     const inactive = await handleGhlWebhook(
-      post({ locationId: "loc_1", contactId: "contact_1" }),
+      post({ locationId: "loc1", contactId: "contact1" }),
       harness.deps,
     );
     const badBody = await badToken.json();
@@ -184,7 +184,7 @@ describe("GHL webhook", () => {
     const open = deps();
     await open.tenants.upsert(tenant({ webhookTokenHash: null }));
     const missing = await handleGhlWebhook(
-      postUrl({ locationId: "loc_1", contactId: "c" }, "https://example.test/api/webhooks/ghl"),
+      postUrl({ locationId: "loc1", contactId: "c" }, "https://example.test/api/webhooks/ghl"),
       open.deps,
     );
     expect(missing.status).toBe(401);
@@ -193,20 +193,20 @@ describe("GHL webhook", () => {
     const closed = deps();
     await closed.tenants.upsert(tenant());
     const rejected = await handleGhlWebhook(
-      postUrl({ locationId: "loc_1", contactId: "c" }, "https://example.test/api/webhooks/ghl?t=wrong"),
+      postUrl({ locationId: "loc1", contactId: "c" }, "https://example.test/api/webhooks/ghl?t=wrong"),
       closed.deps,
     );
     expect(rejected.status).toBe(401);
-    const accepted = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "c" }), closed.deps);
+    const accepted = await handleGhlWebhook(post({ locationId: "loc1", contactId: "c" }), closed.deps);
     expect(accepted.status).toBe(202);
   });
 
   it("releases the dedupe key when processing fails so a retry can run", async () => {
     const harness = deps({ fail: true });
     await harness.tenants.upsert(tenant());
-    const failed = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "c", eventId: "evt-1" }), harness.deps);
+    const failed = await handleGhlWebhook(post({ locationId: "loc1", contactId: "c", eventId: "evt-1" }), harness.deps);
     expect(failed.status).toBe(500);
-    const again = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "c", eventId: "evt-1" }), harness.deps);
+    const again = await handleGhlWebhook(post({ locationId: "loc1", contactId: "c", eventId: "evt-1" }), harness.deps);
     expect(again.status).toBe(500);
     expect(harness.listCalls()).toBe(2);
   });
@@ -221,10 +221,10 @@ describe("GHL webhook", () => {
     const harness = deps({ ordersAt: (call) => (call === 1 ? firstOrders : laterOrders) });
     harness.deps.idempotency = new MemoryIdempotencyStore(() => now);
     await harness.tenants.upsert(tenant());
-    const first = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+    const first = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
     expect(await first.json()).toMatchObject({ accepted: true, written: true });
     now += 10_000;
-    const second = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+    const second = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
     expect(await second.json()).toEqual({ accepted: true, written: true });
     expect(harness.listCalls()).toBe(2);
     expect(harness.updates.at(-1)?.total_orders).toBe("2");
@@ -254,9 +254,9 @@ describe("GHL webhook", () => {
             ],
     });
     await harness.tenants.upsert(tenant());
-    const firstPromise = handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+    const firstPromise = handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
     await entered;
-    const second = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+    const second = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
     expect(await second.json()).toEqual({ accepted: true, queued: true });
     releaseFirst();
     const first = await firstPromise;
@@ -283,7 +283,7 @@ describe("GHL webhook", () => {
     });
     const harness = deps({ orders: [listed], detail });
     await harness.tenants.upsert(tenant());
-    const response = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+    const response = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
     expect(response.status).toBe(202);
     expect(harness.detailCalls()).toBe(2);
     expect(harness.updates[0]?.total_orders).toBe("1");
@@ -294,7 +294,7 @@ describe("GHL webhook", () => {
       orders: [order({ ...listed, paymentStatus: "unpaid", liveMode: true })],
     });
     await complete.tenants.upsert(tenant());
-    await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), complete.deps);
+    await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), complete.deps);
     expect(complete.detailCalls()).toBe(1);
   });
 
@@ -306,7 +306,7 @@ describe("GHL webhook", () => {
         detailError: new Error('status 500 {"contactSnapshot":{"email":"secret@example.test"}}'),
       });
       await harness.tenants.upsert(tenant());
-      const response = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+      const response = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
       expect(response.status).toBe(202);
       expect(await response.json()).toEqual({ accepted: true, written: true });
       expect(harness.updates[0]?.total_orders).toBe("1");
@@ -322,21 +322,21 @@ describe("GHL webhook", () => {
   it("queues while a lock is held and still dedupes an explicit event id", async () => {
     const harness = deps();
     await harness.tenants.upsert(tenant());
-    await harness.deps.idempotency.setNx("lock:loc_1:contact_1", 30);
+    await harness.deps.idempotency.setNx("lock:loc1:contact1", 30);
     const locked = await handleGhlWebhook(
-      post({ locationId: "loc_1", contactId: "contact_1", eventId: "evt-9" }),
+      post({ locationId: "loc1", contactId: "contact1", eventId: "evt-9" }),
       harness.deps,
     );
     expect(await locked.json()).toEqual({ accepted: true, queued: true });
     expect(harness.listCalls()).toBe(0);
-    await harness.deps.idempotency.del("lock:loc_1:contact_1");
+    await harness.deps.idempotency.del("lock:loc1:contact1");
     const retried = await handleGhlWebhook(
-      post({ locationId: "loc_1", contactId: "contact_1", eventId: "evt-9" }),
+      post({ locationId: "loc1", contactId: "contact1", eventId: "evt-9" }),
       harness.deps,
     );
     expect(retried.status).toBe(202);
     const duplicate = await handleGhlWebhook(
-      post({ locationId: "loc_1", contactId: "contact_1", eventId: "evt-9" }),
+      post({ locationId: "loc1", contactId: "contact1", eventId: "evt-9" }),
       harness.deps,
     );
     expect(await duplicate.json()).toEqual({ accepted: true, duplicate: true });
@@ -350,28 +350,58 @@ describe("GHL webhook", () => {
       await harness.tenants.upsert(tenant());
       const store = harness.deps.idempotency;
       const originalDel = store.del.bind(store);
+      const rerunAtLockRelease: Array<string | null> = [];
       let armed = true;
       store.del = async (key) => {
+        if (key === "lock:loc1:contact1") rerunAtLockRelease.push(await store.get("rerun:loc1:contact1"));
         await originalDel(key);
-        if (armed && key === "lock:loc_1:contact_1") {
+        if (armed && key === "lock:loc1:contact1") {
           armed = false;
-          await store.set("rerun:loc_1:contact_1", "1", 120);
+          await store.set("rerun:loc1:contact1", "1", 120);
         }
       };
-      const response = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+      const response = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
       expect(response.status).toBe(202);
       expect(harness.listCalls()).toBe(2);
-      expect(await store.get("rerun:loc_1:contact_1")).toBe("1");
+      expect(rerunAtLockRelease).toEqual([null, "1"]);
+      expect(await store.get("rerun:loc1:contact1")).toBe("1");
       const text = errorLog.mock.calls.map((call) => String(call[0])).join("\n");
-      const contactRef = createHash("sha256").update("contact_1", "utf8").digest("hex").slice(0, 12);
+      const contactRef = createHash("sha256").update("contact1", "utf8").digest("hex").slice(0, 12);
       expect(text).toContain("webhook.rerun_failed");
-      expect(text).toContain("loc_1");
+      expect(text).toContain("loc1");
       expect(text).toContain(contactRef);
       expect(text).toContain("upstream down");
-      expect(text).not.toContain("contact_1");
+      expect(text).not.toContain("contact1");
     } finally {
       errorLog.mockRestore();
     }
+  });
+
+  it("releases the contact lock when restoring the rerun flag throws", async () => {
+    const harness = deps({ failAt: 2 });
+    await harness.tenants.upsert(tenant());
+    const store = harness.deps.idempotency;
+    const originalDel = store.del.bind(store);
+    const originalSet = store.set.bind(store);
+    let armed = true;
+    let failRestore = false;
+    store.set = async (key, value, ttl) => {
+      if (failRestore && key === "rerun:loc1:contact1") throw new Error("rerun store down");
+      await originalSet(key, value, ttl);
+    };
+    store.del = async (key) => {
+      await originalDel(key);
+      if (armed && key === "lock:loc1:contact1") {
+        armed = false;
+        await store.set("rerun:loc1:contact1", "1", 120);
+        failRestore = true;
+      }
+    };
+    await expect(handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps)).rejects.toThrow(
+      "rerun store down",
+    );
+    expect(harness.listCalls()).toBe(2);
+    expect(await store.get("lock:loc1:contact1")).toBeNull();
   });
 
   it("reads a standard GoHighLevel webhook from customData, then location.id and contact_id", async () => {
@@ -384,20 +414,30 @@ describe("GHL webhook", () => {
         location: { id: string };
         contact_id: string;
         email: string;
+        tags: string;
+        attributionSource: { sessionSource: string };
+        contact: { attributionSource: { sessionSource: string } };
       };
+      expect(payload.location.id).toMatch(/^[A-Za-z0-9]{20}$/);
+      expect(payload.contact_id).toMatch(/^[A-Za-z0-9]{20}$/);
+      expect(payload.customData.locationId).toBe(payload.location.id);
+      expect(payload.customData.contactId).toBe(payload.contact_id);
+      expect(payload.tags).toContain(",");
+      expect(payload.attributionSource.sessionSource).toBe("Direct traffic");
+      expect(payload.contact.attributionSource.sessionSource).toBe("Direct traffic");
       const harness = deps();
-      await harness.tenants.upsert(tenant());
+      await harness.tenants.upsert(tenant({ locationId: payload.location.id }));
       const response = await handleGhlWebhook(post(payload), harness.deps);
       expect(response.status).toBe(202);
       expect(await response.json()).toMatchObject({ accepted: true, written: true });
-      expect(harness.seenKeys).toEqual(["loc_1:pit-plaintext"]);
+      expect(harness.seenKeys).toEqual([`${payload.location.id}:pit-plaintext`]);
 
       const fallback = deps();
-      await fallback.tenants.upsert(tenant());
+      await fallback.tenants.upsert(tenant({ locationId: payload.location.id }));
       const { customData: _customData, ...withoutCustom } = payload;
       const fallbackResponse = await handleGhlWebhook(post(withoutCustom), fallback.deps);
       expect(fallbackResponse.status).toBe(202);
-      expect(fallback.seenKeys).toEqual(["loc_1:pit-plaintext"]);
+      expect(fallback.seenKeys).toEqual([`${payload.location.id}:pit-plaintext`]);
 
       const customWins = deps();
       await customWins.tenants.upsert(tenant());
@@ -406,18 +446,20 @@ describe("GHL webhook", () => {
           contact_id: "other_contact",
           email: payload.email,
           location: { id: "other_loc", name: "Decoy" },
-          customData: { locationId: "loc_1", contactId: "c_from_custom" },
+          customData: { locationId: "loc1", contactId: "cFromCustom" },
         }),
         customWins.deps,
       );
       expect(customResponse.status).toBe(202);
-      expect(customWins.seenKeys).toEqual(["loc_1:pit-plaintext"]);
+      expect(customWins.seenKeys).toEqual(["loc1:pit-plaintext"]);
 
       const text = [info, warn, errorLog].flatMap((spy) => spy.mock.calls.map((call) => String(call[0]))).join("\n");
       expect(text).not.toContain(payload.email);
       expect(text).not.toContain("Pat Example");
       expect(text).not.toContain("+15555550123");
       expect(text).not.toContain("1 Example Street");
+      expect(text).not.toContain("pii-custom-field-secret");
+      expect(text).not.toContain(payload.contact_id);
     } finally {
       info.mockRestore();
       warn.mockRestore();
@@ -425,9 +467,28 @@ describe("GHL webhook", () => {
     }
   });
 
+  it("returns 400 when locationId or contactId is not 1-64 alphanumeric characters", async () => {
+    const harness = deps();
+    await harness.tenants.upsert(tenant());
+    const longId = "a".repeat(65);
+    const tooLong = await handleGhlWebhook(post({ locationId: "loc1", contactId: longId }), harness.deps);
+    const punctuated = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact1" }), harness.deps);
+    const spaced = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact 1" }), harness.deps);
+    expect(tooLong.status).toBe(400);
+    expect(punctuated.status).toBe(400);
+    expect(spaced.status).toBe(400);
+    expect(await tooLong.json()).toEqual({ error: "invalid_id" });
+    expect(harness.listCalls()).toBe(0);
+    const max = await handleGhlWebhook(
+      post({ locationId: "a".repeat(64), contactId: "b".repeat(64) }),
+      harness.deps,
+    );
+    expect(max.status).toBe(401);
+  });
+
   it("returns 400 for a body that is not a location and contact nudge", async () => {
     const harness = deps();
-    expect((await handleGhlWebhook(post({ locationId: "loc_1" }), harness.deps)).status).toBe(400);
+    expect((await handleGhlWebhook(post({ locationId: "loc1" }), harness.deps)).status).toBe(400);
     const request = new Request("https://example.test/api/webhooks/ghl", { method: "POST", body: "{" });
     expect((await handleGhlWebhook(request, harness.deps)).status).toBe(400);
     const method = await handleGhlWebhook(new Request("https://example.test/api/webhooks/ghl"), harness.deps);
@@ -446,7 +507,7 @@ describe("POST /api/webhooks/ghl", () => {
     vi.stubEnv("TENANT_KEY_ENCRYPTION_KEY", "");
     vi.stubEnv("KV_REST_API_URL", "");
     vi.stubEnv("KV_REST_API_TOKEN", "");
-    const response = await POST(post({ locationId: "loc_1", contactId: "c" }));
+    const response = await POST(post({ locationId: "loc1", contactId: "c" }));
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "misconfigured" });
   });

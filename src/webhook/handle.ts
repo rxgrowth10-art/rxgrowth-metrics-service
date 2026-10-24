@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { GhlClient } from "../ghl/index.js";
+import { ALPHANUMERIC_ID } from "../ids.js";
 import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token.js";
 import { json } from "../http/json.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
@@ -37,6 +37,7 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
     return json({ error: "invalid_json" }, 400);
   }
   const ids = readIds(body);
+  if (ids === "invalid") return json({ error: "invalid_id" }, 400);
   if (!ids) return json({ error: "locationId and contactId are required" }, 400);
 
   const tenant = await deps.tenants.getByLocationId(ids.locationId);
@@ -90,16 +91,20 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
       } catch (error) {
         retry = { ok: false, message: error instanceof Error ? error.message : "unknown" };
       } finally {
-        await deps.idempotency.del(lockKey);
-      }
-      if (!retry.ok) {
-        // runUntilQuiet clears the rerun flag before computing. Put it back so a failed trailing pass is not dropped.
-        await deps.idempotency.set(rerunKey, "1", CONTACT_RERUN_TTL_SECONDS);
-        log("error", "webhook.rerun_failed", {
-          locationId: ids.locationId,
-          contactId: contactLogRef(ids.contactId),
-          message: retry.message,
-        });
+        try {
+          if (!retry.ok) {
+            // runUntilQuiet clears the flag before computing. Restore it while the lock is still held
+            // so the single queued pass does not become a second recompute.
+            await deps.idempotency.set(rerunKey, "1", CONTACT_RERUN_TTL_SECONDS);
+            log("error", "webhook.rerun_failed", {
+              locationId: ids.locationId,
+              contactId: ids.contactId,
+              message: retry.message,
+            });
+          }
+        } finally {
+          await deps.idempotency.del(lockKey);
+        }
       }
     }
   }
@@ -147,15 +152,23 @@ function authorized(request: Request, tenant: Tenant | null): tenant is Tenant {
   return Boolean(tenant?.active) && matches;
 }
 
-/** Short hash so a failure log can be correlated without writing the raw contact id. */
-function contactLogRef(contactId: string): string {
-  return createHash("sha256").update(contactId, "utf8").digest("hex").slice(0, 12);
-}
-
-function readString(value: unknown): string | null {
+/** A present but illegal id is rejected. An empty value falls through to the next source. */
+function readId(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return trimmed ? trimmed : null;
+  if (!trimmed) return undefined;
+  if (!ALPHANUMERIC_ID.test(trimmed)) return null;
+  return trimmed;
+}
+
+function firstId(...candidates: Array<string | null | undefined>): string | null | "invalid" {
+  for (const candidate of candidates) {
+    if (candidate === undefined) continue;
+    if (candidate === null) return "invalid";
+    return candidate;
+  }
+  return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -168,13 +181,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * (`contact_id`, `location.id`) plus the action's key-value pairs under
  * `customData`. The body is not logged; it contains contact PII.
  */
-function readIds(body: unknown): { locationId: string; contactId: string } | null {
+function readIds(body: unknown): { locationId: string; contactId: string } | "invalid" | null {
   const record = asRecord(body);
   if (!record) return null;
   const custom = asRecord(record.customData);
   const location = asRecord(record.location);
-  const locationId = readString(custom?.locationId) ?? readString(record.locationId) ?? readString(location?.id);
-  const contactId = readString(custom?.contactId) ?? readString(record.contactId) ?? readString(record.contact_id);
+  const locationId = firstId(readId(custom?.locationId), readId(record.locationId), readId(location?.id));
+  const contactId = firstId(readId(custom?.contactId), readId(record.contactId), readId(record.contact_id));
+  if (locationId === "invalid" || contactId === "invalid") return "invalid";
   if (!locationId || !contactId) return null;
   return { locationId, contactId };
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { log, redact } from "../../src/log/logger.js";
+import { contactLogRef, log, redact } from "../../src/log/logger.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -16,7 +16,7 @@ describe("logger", () => {
         note: "Authorization: Bearer pit-secret",
       }),
     ).toEqual({
-      contactId: "c1",
+      contactId: contactLogRef("c1"),
       apiKey: "[redacted]",
       api_key_encrypted: "[redacted]",
       nested: { authorization: "[redacted]", ok: true },
@@ -34,6 +34,28 @@ describe("logger", () => {
     expect(parsed.data.locationId).toBe("loc");
     expect(parsed.data.apiKey).toBe("[redacted]");
     expect(line).not.toContain("pit-secret");
+  });
+
+  it("hashes every contactId and never writes the raw id", () => {
+    const raw = "contact1";
+    const other = "contact2";
+    const redacted = redact({
+      contactId: raw,
+      contact_id: raw,
+      contactIds: [raw, other, 4],
+      nested: { contactId: raw },
+      locationId: "loc1",
+    });
+    expect(JSON.stringify(redacted)).not.toContain(raw);
+    expect(JSON.stringify(redacted)).not.toContain(other);
+    expect(redacted).toEqual({
+      contactId: contactLogRef(raw),
+      contact_id: contactLogRef(raw),
+      contactIds: [contactLogRef(raw), contactLogRef(other), 4],
+      nested: { contactId: contactLogRef(raw) },
+      locationId: "loc1",
+    });
+    expect(contactLogRef(raw)).toHaveLength(12);
   });
 
   it("strips query strings so webhook tokens are not logged", () => {

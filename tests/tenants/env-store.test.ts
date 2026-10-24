@@ -12,7 +12,7 @@ describe("env tenant store", () => {
   it("loads one tenant from TENANT_CONFIG and encrypts a plaintext api key", async () => {
     const store = createEnvTenantStore(KEY, {
       TENANT_CONFIG: JSON.stringify({
-        locationId: "loc_env",
+        locationId: "locenv",
         name: "Env Lab",
         apiKey: "pit-env",
         timezone: "Africa/Cairo",
@@ -22,32 +22,32 @@ describe("env tenant store", () => {
         active: true,
       }),
     });
-    const tenant = await store.getByLocationId("loc_env");
+    const tenant = await store.getByLocationId("locenv");
     expect(tenant?.name).toBe("Env Lab");
     expect(tenant?.timezone).toBe("Africa/Cairo");
     expect(tenant?.m10WorkflowId).toBe("wf_env");
     expect(tenant?.webhookTokenHash).toBe("ab".repeat(32));
     expect(decryptApiKey(tenant?.apiKeyEncrypted ?? "", KEY)).toBe("pit-env");
     expect(await store.getByLocationId("other")).toBeNull();
-    expect((await store.listActive()).map((item) => item.locationId)).toEqual(["loc_env"]);
+    expect((await store.listActive()).map((item) => item.locationId)).toEqual(["locenv"]);
   });
 
   it("loads discrete env vars and keeps an already encrypted key", async () => {
     const ciphertext = encryptApiKey("pit-discrete", KEY);
     const store = createEnvTenantStore(KEY, {
-      TENANT_LOCATION_ID: "loc_discrete",
+      TENANT_LOCATION_ID: "locdiscrete",
       TENANT_NAME: "Discrete",
       TENANT_API_KEY_ENCRYPTED: ciphertext,
       TENANT_TIMEZONE: "America/New_York",
       TENANT_CURRENCY: "USD",
       TENANT_ACTIVE: "false",
     });
-    const tenant = await store.getByLocationId("loc_discrete");
+    const tenant = await store.getByLocationId("locdiscrete");
     expect(tenant?.active).toBe(false);
     expect(tenant?.apiKeyEncrypted).toBe(ciphertext);
     expect(await store.listActive()).toEqual([]);
     await store.upsert({ ...tenant!, active: true });
-    expect((await store.listActive()).map((item) => item.locationId)).toEqual(["loc_discrete"]);
+    expect((await store.listActive()).map((item) => item.locationId)).toEqual(["locdiscrete"]);
   });
 
   it("rejects a config that does not name exactly one key", () => {
@@ -58,6 +58,17 @@ describe("env tenant store", () => {
       }),
     ).toThrow(/only one/);
     expect(() => createEnvTenantStore(KEY, {})).toThrow(/TENANT_LOCATION_ID/);
+    expect(() => createEnvTenantStore(KEY, { TENANT_LOCATION_ID: "loc_env", TENANT_API_KEY: "pit" })).toThrow(
+      /1-64 alphanumeric/,
+    );
+    expect(() =>
+      createEnvTenantStore(KEY, { TENANT_LOCATION_ID: "a".repeat(65), TENANT_API_KEY: "pit" }),
+    ).toThrow(/1-64 alphanumeric/);
+    expect(() =>
+      createEnvTenantStore(KEY, {
+        TENANT_CONFIG: JSON.stringify({ locationId: "loc_env", apiKey: "pit" }),
+      }),
+    ).toThrow(/1-64 alphanumeric/);
     expect(() => createEnvTenantStore(KEY, { TENANT_CONFIG: "{" })).toThrow(/JSON/);
   });
 });
@@ -76,13 +87,13 @@ describe("TENANT_STORE selection", () => {
     vi.stubEnv("M06_FULL_RECONCILE_WEEKDAY", "Monday");
     vi.stubEnv(
       "TENANT_CONFIG",
-      JSON.stringify({ locationId: "loc_env", name: "Env Lab", apiKey: "pit-env", timezone: "UTC" }),
+      JSON.stringify({ locationId: "locenv", name: "Env Lab", apiKey: "pit-env", timezone: "UTC" }),
     );
     const deps = createDefaultDeps();
     expect(deps.reconcileHours).toBe(24);
     expect(deps.reconcilePageCap).toBe(10);
     expect(deps.fullReconcileWeekday).toBe("monday");
-    const tenant = await deps.tenants.getByLocationId("loc_env");
+    const tenant = await deps.tenants.getByLocationId("locenv");
     expect(tenant?.currency).toBe("USD");
     expect(decryptApiKey(tenant?.apiKeyEncrypted ?? "", deps.encryptionKey)).toBe("pit-env");
 

@@ -37,14 +37,14 @@ describe("tenant upsert", () => {
       {
         DATABASE_URL: "postgres://example",
         TENANT_KEY_ENCRYPTION_KEY: KEY_B64,
-        TENANT_LOCATION_ID: "loc_1",
+        TENANT_LOCATION_ID: "loc1",
         TENANT_ACTIVE: "false",
       },
       "pit-from-stdin",
     );
-    expect(plan.locationId).toBe("loc_1");
-    expect(plan.params[0]).toBe("loc_1");
-    expect(plan.params[1]).toBe("loc_1");
+    expect(plan.locationId).toBe("loc1");
+    expect(plan.params[0]).toBe("loc1");
+    expect(plan.params[1]).toBe("loc1");
     expect(plan.params[3]).toBe("UTC");
     expect(plan.params[4]).toBe("USD");
     expect(plan.params[5]).toBeNull();
@@ -63,7 +63,7 @@ describe("tenant upsert", () => {
         ...process.env,
         DATABASE_URL: "",
         TENANT_KEY_ENCRYPTION_KEY: KEY_B64,
-        TENANT_LOCATION_ID: "loc_1",
+        TENANT_LOCATION_ID: "loc1",
       },
     });
     expect(missingUrl.status).toBe(1);
@@ -78,12 +78,35 @@ describe("tenant upsert", () => {
         ...process.env,
         DATABASE_URL: "postgres://example",
         TENANT_KEY_ENCRYPTION_KEY: KEY_B64,
-        TENANT_LOCATION_ID: "loc_1",
+        TENANT_LOCATION_ID: "loc1",
       },
     });
     expect(missingKey.status).toBe(1);
     expect(missingKey.stderr).toContain("Pass the GoHighLevel API key on stdin");
     expect(missingKey.stdout).toBe("");
     expect(missingKey.stderr).not.toContain("Webhook token printed once");
+  });
+
+  it("rejects a location id that is not 1-64 alphanumeric characters", () => {
+    expect(() =>
+      tenantUpsertPlan(
+        {
+          DATABASE_URL: "postgres://example",
+          TENANT_KEY_ENCRYPTION_KEY: KEY_B64,
+          TENANT_LOCATION_ID: "loc_1",
+        },
+        "pit-from-stdin",
+      ),
+    ).toThrow(/1-64 alphanumeric/);
+    expect(() =>
+      tenantUpsertPlan(
+        {
+          DATABASE_URL: "postgres://example",
+          TENANT_KEY_ENCRYPTION_KEY: KEY_B64,
+          TENANT_LOCATION_ID: "a".repeat(65),
+        },
+        "pit-from-stdin",
+      ),
+    ).toThrow(/1-64 alphanumeric/);
   });
 });
