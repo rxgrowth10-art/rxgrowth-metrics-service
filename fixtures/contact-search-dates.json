@@ -1,0 +1,38 @@
+{
+  "contacts": [
+    {
+      "id": "contact_date_ymd",
+      "locationId": "loc_test",
+      "dateAdded": "2026-10-21T18:47:57.185Z",
+      "customFields": [
+        { "id": "WUgA196HILTt2ul6vfqf", "value": "2026-10-21" }
+      ]
+    },
+    {
+      "id": "contact_date_search_iso",
+      "locationId": "loc_test",
+      "dateAdded": "2026-10-21T18:47:57.185Z",
+      "customFields": [
+        { "id": "WUgA196HILTt2ul6vfqf", "value": "2026-10-21T00:00:00.000Z" }
+      ]
+    },
+    {
+      "id": "contact_date_mdy",
+      "locationId": "loc_test",
+      "dateAdded": "2026-10-21T18:47:57.185Z",
+      "customFields": [
+        { "id": "WUgA196HILTt2ul6vfqf", "value": "10-21-2026" }
+      ]
+    },
+    {
+      "id": "contact_date_epoch",
+      "locationId": "loc_test",
+      "dateAdded": "2026-10-21T18:47:57.185Z",
+      "customFields": [
+        { "id": "WUgA196HILTt2ul6vfqf", "value": 1792540800000 }
+      ]
+    }
+  ],
+  "total": 4,
+  "searchAfter": ["2026-10-21T18:47:57.185Z", "contact_date_epoch"]
+}

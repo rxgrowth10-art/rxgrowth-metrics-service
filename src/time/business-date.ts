@@ -1,4 +1,6 @@
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const MDY_DATE = /^(\d{2})-(\d{2})-(\d{4})$/;
+const ISO_MIDNIGHT_Z = /^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.\d{1,3})?Z$/i;
 
 export function isIsoDate(value: string): boolean {
   return ISO_DATE.test(value);
@@ -17,14 +19,24 @@ export function parseInstant(value: unknown): Date | null {
 }
 
 /**
- * Calendar day for a value stored on a contact or order.
- * A YYYY-MM-DD string stays that calendar day. Epoch values and ISO timestamps
- * are converted in the tenant timezone.
+ * Calendar day for a DATE custom field stored on a contact.
+ * `YYYY-MM-DD` stays that day. `MM-DD-YYYY` is the legacy formatter.
+ * Contact search returns the same field as ISO midnight UTC (`...T00:00:00.000Z`);
+ * that UTC year-month-day is the calendar date and is not shifted into the tenant timezone.
+ * Epoch milliseconds, as a number or a numeric string, use the UTC calendar date too.
+ * Any other ISO timestamp is still a real instant and uses the tenant timezone.
  */
-export function parseStoredDate(value: string, timeZone: string): string | null {
+export function parseStoredDate(value: unknown, timeZone: string): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return utcCalendarDate(instantFromEpoch(value));
+  if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
   if (isIsoDate(trimmed)) return trimmed;
+  const monthDayYear = MDY_DATE.exec(trimmed);
+  if (monthDayYear) return monthDayYearDate(monthDayYear[1] ?? "", monthDayYear[2] ?? "", monthDayYear[3] ?? "");
+  const midnight = ISO_MIDNIGHT_Z.exec(trimmed);
+  if (midnight?.[1]) return midnight[1];
+  if (/^\d+$/.test(trimmed)) return utcCalendarDate(instantFromEpoch(Number(trimmed)));
   const instant = parseInstant(trimmed);
   if (!instant) return null;
   return businessDateString(instant, timeZone);
@@ -56,6 +68,26 @@ export function addCalendarDays(isoDate: string, days: number): string | null {
   const date = isoDateToUtc(isoDate);
   if (!date || !Number.isFinite(days)) return null;
   date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function utcCalendarDate(date: Date | null): string | null {
+  if (!date) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function monthDayYearDate(month: string, day: string, year: string): string | null {
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+  const yearNumber = Number(year);
+  const date = new Date(Date.UTC(yearNumber, monthNumber - 1, dayNumber));
+  if (
+    date.getUTCFullYear() !== yearNumber ||
+    date.getUTCMonth() !== monthNumber - 1 ||
+    date.getUTCDate() !== dayNumber
+  ) {
+    return null;
+  }
   return date.toISOString().slice(0, 10);
 }
 
