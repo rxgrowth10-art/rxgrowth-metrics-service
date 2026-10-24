@@ -9,6 +9,7 @@ import { decryptApiKey } from "../tenants/index.js";
 import { businessDateString, calendarDayDifference, parseStoredDate } from "../time/business-date.js";
 import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap } from "../writeback/field-cache.js";
 import { readContactField, requireFieldId } from "../writeback/fields.js";
+import { reconcileRecentOrders } from "./reconcile.js";
 
 /** Longer than the 300s function limit so a second run cannot overlap a live hop. */
 const LOCK_TTL_SECONDS = 360;
@@ -27,6 +28,10 @@ export interface M10Deps {
   now: () => Date;
   /** Stop a tenant hop after this many milliseconds and leave a cursor. Default 240s. */
   budgetMs?: number;
+  /** Order-update window for the M06 reconcile that runs before eligibility. Default 48. */
+  reconcileHours?: number;
+  /** Test override for the location-order page cap. Default 30. */
+  reconcilePageCap?: number;
   /**
    * When set, the dispatcher asks this function to run each active tenant
    * instead of walking them inside the cron invocation.
@@ -46,6 +51,10 @@ export interface M10Summary {
   skippedLock: number;
   enrolled: number;
   errors: number;
+  /** Contacts whose M06 metrics were written during the order reconcile. */
+  reconciled: number;
+  /** Contacts whose M06 hash already matched during the order reconcile. */
+  reconcileUnchanged: number;
 }
 
 export interface M10TenantResult {
@@ -196,10 +205,25 @@ async function runTenant(
   requireFieldId(ids, "winback_tier");
   const started = deps.now().getTime();
   const budget = deps.budgetMs ?? DEFAULT_BUDGET_MS;
+  const fresh = new Map<string, Record<string, string>>();
+  const reconcileAgain = await reconcileRecentOrders({
+    client,
+    tenant,
+    deps,
+    idempotency: deps.idempotency,
+    day,
+    startedMs: started,
+    budgetMs: budget,
+    summary,
+    fresh,
+  });
+  if (reconcileAgain) return true;
   let cursor = await readCursor(deps, tenant.locationId, day);
   for (let page = 0; page < MAX_INLINE_HOPS; page += 1) {
     const batch = await client.searchContactsPage(cursor);
-    for (const contact of batch.contacts) await processContact(client, tenant, deps, summary, ids, contact);
+    for (const contact of batch.contacts) {
+      await processContact(client, tenant, deps, summary, ids, contact, fresh);
+    }
     const next = batch.searchAfter;
     const stuck = cursor !== null && next !== null && JSON.stringify(cursor) === JSON.stringify(next);
     if (!next || next.length === 0 || stuck) {
@@ -216,6 +240,13 @@ async function runTenant(
   return true;
 }
 
+const FRESH_METRIC_KEYS = [
+  "qualifying_order_count",
+  "total_orders",
+  "last_order_date",
+  "typical_order_interval_days",
+] as const;
+
 async function processContact(
   client: GhlClient,
   tenant: Tenant,
@@ -223,13 +254,15 @@ async function processContact(
   summary: M10Summary,
   ids: ReadonlyMap<string, string>,
   contact: GhlContact,
+  fresh: ReadonlyMap<string, Record<string, string>>,
 ): Promise<void> {
   summary.contacts += 1;
   if (readContactField(contact, "winback_cycle_status", ids) === "In Progress") {
     summary.skippedInProgress += 1;
     return;
   }
-  const decision = decisionFromContact(contact, ids, tenant.timezone, deps.now());
+  const view = withFreshMetrics(contact, fresh.get(contact.id), ids);
+  const decision = decisionFromContact(view, ids, tenant.timezone, deps.now());
   if (!decision) {
     summary.skippedNoOrders += 1;
     return;
@@ -250,6 +283,32 @@ async function processContact(
     { id: requireFieldId(ids, "winback_tier"), key: "winback_tier", value: decision.tier },
   ]);
   summary.written += 1;
+}
+
+function withFreshMetrics(
+  contact: GhlContact,
+  values: Record<string, string> | undefined,
+  ids: ReadonlyMap<string, string>,
+): GhlContact {
+  if (!values) return contact;
+  const customFields = contact.customFields.map((field) => ({ ...field }));
+  for (const key of FRESH_METRIC_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) continue;
+    const id = ids.get(key) ?? null;
+    const existing = customFields.find((field) => {
+      const fieldKey = field.key?.replace(/^contact\./, "");
+      return (id !== null && field.id === id) || fieldKey === key;
+    });
+    const value = values[key] ?? "";
+    if (existing) {
+      existing.value = value;
+      if (!existing.id && id) existing.id = id;
+      if (!existing.key) existing.key = key;
+    } else {
+      customFields.push({ id, key, value });
+    }
+  }
+  return { id: contact.id, customFields };
 }
 
 function cursorKey(locationId: string, day: string): string {
@@ -332,8 +391,10 @@ function addSummary(target: M10Summary, part: M10Summary, includeTenants: boolea
   target.skippedInProgress += part.skippedInProgress;
   target.skippedNoOrders += part.skippedNoOrders;
   target.skippedLock += part.skippedLock;
-  target.enrolled += part.enrolled;
-  target.errors += part.errors;
+  target.enrolled += part.enrolled ?? 0;
+  target.errors += part.errors ?? 0;
+  target.reconciled += part.reconciled ?? 0;
+  target.reconcileUnchanged += part.reconcileUnchanged ?? 0;
 }
 
 function mergeSummaries(parts: M10Summary[]): M10Summary {
@@ -353,5 +414,7 @@ function emptySummary(): M10Summary {
     skippedLock: 0,
     enrolled: 0,
     errors: 0,
+    reconciled: 0,
+    reconcileUnchanged: 0,
   };
 }

@@ -1,16 +1,18 @@
 import type { GhlClient } from "../ghl/index.js";
-import { hydrateOrders } from "../ghl/hydrate-orders.js";
-import { applyLatestOrderDetail } from "../ghl/latest-order-detail.js";
 import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token.js";
 import { json } from "../http/json.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
 import { log } from "../log/logger.js";
 import { decryptApiKey, type Tenant, type TenantStore } from "../tenants/index.js";
-import { writeM06Metrics } from "../writeback/m06.js";
+import {
+  CONTACT_LOCK_TTL_SECONDS,
+  CONTACT_RERUN_TTL_SECONDS,
+  contactLockKey,
+  contactRerunKey,
+  recomputeM06Contact,
+} from "../writeback/recompute.js";
 
 const EVENT_TTL_SECONDS = 300;
-const LOCK_TTL_SECONDS = 30;
-const RERUN_TTL_SECONDS = 120;
 
 export interface WebhookDeps {
   tenants: TenantStore;
@@ -54,10 +56,10 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
     return json({ accepted: true, duplicate: true }, 202);
   }
 
-  const lockKey = `lock:${ids.locationId}:${ids.contactId}`;
-  const rerunKey = `rerun:${ids.locationId}:${ids.contactId}`;
-  if (!(await deps.idempotency.setNx(lockKey, LOCK_TTL_SECONDS))) {
-    await deps.idempotency.set(rerunKey, "1", RERUN_TTL_SECONDS);
+  const lockKey = contactLockKey(ids.locationId, ids.contactId);
+  const rerunKey = contactRerunKey(ids.locationId, ids.contactId);
+  if (!(await deps.idempotency.setNx(lockKey, CONTACT_LOCK_TTL_SECONDS))) {
+    await deps.idempotency.set(rerunKey, "1", CONTACT_RERUN_TTL_SECONDS);
     if (dedupeKey) await deps.idempotency.del(dedupeKey);
     log("info", "webhook.queued", { locationId: ids.locationId, contactId: ids.contactId });
     return json({ accepted: true, queued: true }, 202);
@@ -82,7 +84,7 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
     return json({ accepted: true, written: outcome.written }, 202);
   } finally {
     await deps.idempotency.del(lockKey);
-    if ((await deps.idempotency.get(rerunKey)) && (await deps.idempotency.setNx(lockKey, LOCK_TTL_SECONDS))) {
+    if ((await deps.idempotency.get(rerunKey)) && (await deps.idempotency.setNx(lockKey, CONTACT_LOCK_TTL_SECONDS))) {
       try {
         await runUntilQuiet(ids, tenant, deps, rerunKey);
       } finally {
@@ -118,17 +120,15 @@ async function compute(
 ): Promise<{ written: boolean }> {
   const apiKey = decryptApiKey(tenant.apiKeyEncrypted, deps.encryptionKey);
   const client = deps.ghlFactory({ apiKey, locationId: tenant.locationId });
-  const listed = await client.listOrders(ids.contactId);
-  const hydrated = await hydrateOrders(listed, (orderId) => client.getOrder(orderId));
-  const orders = await applyLatestOrderDetail(hydrated, (orderId) => client.getOrder(orderId));
-  return writeM06Metrics({
+  const result = await recomputeM06Contact({
     client,
     contactId: ids.contactId,
-    orders,
+    locationId: tenant.locationId,
     timeZone: tenant.timezone,
     now: deps.now(),
-    fieldCache: { store: deps.idempotency, locationId: tenant.locationId },
+    idempotency: deps.idempotency,
   });
+  return { written: result.written };
 }
 
 function authorized(request: Request, tenant: Tenant): boolean {

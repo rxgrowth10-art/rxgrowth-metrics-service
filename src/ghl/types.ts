@@ -32,6 +32,11 @@ export interface GhlContactPage {
   searchAfter: unknown[] | null;
 }
 
+export interface GhlOrderPage {
+  orders: GhlOrder[];
+  totalCount: number | null;
+}
+
 export interface GhlCustomField {
   id: string;
   fieldKey: string;
@@ -47,6 +52,8 @@ export interface CustomFieldWrite {
 
 export interface GhlClient {
   listOrders(contactId: string): Promise<GhlOrder[]>;
+  /** One location-wide page. `GET /payments/orders` has no sort parameter. */
+  listLocationOrdersPage(offset: number): Promise<GhlOrderPage>;
   getOrder(orderId: string): Promise<GhlOrder | null>;
   getContact(contactId: string): Promise<GhlContact>;
   listCustomFields(): Promise<GhlCustomField[]>;

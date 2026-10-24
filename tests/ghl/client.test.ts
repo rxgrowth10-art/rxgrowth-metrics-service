@@ -338,4 +338,42 @@ describe("GHL client", () => {
     expect(detail).toMatchObject({ id: "order_9", amount: 93.5, createdAt: "1767225600000", paymentStatus: "unpaid" });
     expect(urls.some((url) => url.includes("altType=location") && url.includes("order_9"))).toBe(true);
   });
+
+  it("lists one location order page with altId and no contact filter", async () => {
+    const clock = fakeClock();
+    const urls: string[] = [];
+    const client = createGhlClient({
+      apiKey: API_KEY,
+      locationId: "loc_1",
+      clock,
+      rateLimiter: new LocationRateLimiter(0, clock),
+      fetchImpl: async (input) => {
+        urls.push(String(input));
+        return jsonResponse({
+          data: [
+            {
+              _id: "o1",
+              contactId: "c1",
+              amount: 10,
+              status: "cancelled",
+              paymentStatus: "paid",
+              liveMode: true,
+              updatedAt: "2026-06-22T00:00:00.000Z",
+            },
+          ],
+          totalCount: 40,
+        });
+      },
+    });
+    const page = await client.listLocationOrdersPage(40);
+    expect(page.totalCount).toBe(40);
+    expect(page.orders.map((item) => item.id)).toEqual(["o1"]);
+    const url = urls[0] ?? "";
+    expect(url).toContain("altType=location");
+    expect(url).toContain("altId=loc_1");
+    expect(url).toContain("locationId=loc_1");
+    expect(url).toContain("offset=40");
+    expect(url).toContain("limit=");
+    expect(url).not.toContain("contactId");
+  });
 });

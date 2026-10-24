@@ -65,6 +65,9 @@ function harness(options?: {
     async listOrders() {
       throw new Error("m10 must not refetch orders");
     },
+    async listLocationOrdersPage() {
+      return { orders: [], totalCount: 0 };
+    },
     async getOrder() {
       throw new Error("m10 must not refetch orders");
     },
@@ -145,6 +148,9 @@ function pagingClient(
   return {
     async listOrders() {
       throw new Error("m10 must not refetch orders");
+    },
+    async listLocationOrdersPage() {
+      return { orders: [], totalCount: 0 };
     },
     async getOrder() {
       throw new Error("m10 must not refetch orders");
@@ -431,6 +437,8 @@ describe("M10 win-back cron", () => {
         skippedLock: 0,
         enrolled: 0,
         errors: 0,
+        reconciled: 0,
+        reconcileUnchanged: 0,
       };
     };
     const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
@@ -471,6 +479,8 @@ describe("M10 win-back cron", () => {
         skippedLock: 0,
         enrolled: 0,
         errors: 0,
+        reconciled: 0,
+        reconcileUnchanged: 0,
       };
     };
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

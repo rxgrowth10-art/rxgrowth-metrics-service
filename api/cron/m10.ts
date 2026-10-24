@@ -50,5 +50,7 @@ async function postTenant(
     skippedLock: body.skippedLock ?? 0,
     enrolled: body.enrolled ?? 0,
     errors: body.errors ?? 0,
+    reconciled: body.reconciled ?? 0,
+    reconcileUnchanged: body.reconcileUnchanged ?? 0,
   };
 }

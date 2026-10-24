@@ -52,6 +52,9 @@ function deps(options?: {
       if (options?.ordersAt) return options.ordersAt(listCalls);
       return options?.orders ?? [order({ amount: 15, createdAt: "2026-01-11T00:00:00.000Z" })];
     },
+    async listLocationOrdersPage() {
+      return { orders: [], totalCount: 0 };
+    },
     async getOrder() {
       detailCalls += 1;
       if (options?.detailError) throw options.detailError;

@@ -1,7 +1,7 @@
 import { GhlRequestError } from "./errors.js";
 import { parseContact, parseContactPage, parseCustomFields, parseOrderPage, parseOrderResource } from "./parse.js";
 import { type Clock, LocationRateLimiter, sharedLimiter, systemClock } from "./rate-limit.js";
-import type { CustomFieldWrite, GhlClient, GhlContact, GhlContactPage, GhlCustomField, GhlOrder } from "./types.js";
+import type { CustomFieldWrite, GhlClient, GhlContact, GhlContactPage, GhlCustomField, GhlOrder, GhlOrderPage } from "./types.js";
 
 export const GHL_API_VERSION = "2021-07-28";
 export const GHL_API_BASE_URL = "https://services.leadconnectorhq.com";
@@ -171,6 +171,20 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
         throw new GhlRequestError("Order pagination exceeded the page cap", 0, "/payments/orders");
       }
       return orders.filter((order) => order.contactId === null || order.contactId === contactId);
+    },
+
+    async listLocationOrdersPage(offset: number): Promise<GhlOrderPage> {
+      const body = await requestJson("GET", "/payments/orders", {
+        query: {
+          locationId,
+          altId: locationId,
+          altType: "location",
+          limit: pageSize,
+          offset,
+        },
+      });
+      const parsed = parseOrderPage(body);
+      return { orders: parsed.orders, totalCount: parsed.totalCount };
     },
 
     async getOrder(orderId: string): Promise<GhlOrder | null> {

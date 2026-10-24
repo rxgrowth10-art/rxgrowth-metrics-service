@@ -17,7 +17,7 @@ A workflow nudge recomputes M06 metrics. A daily cron writes M10 win-back eligib
 
 - `api/webhooks/ghl.ts` — M06 nudge. `POST` JSON `{ "locationId", "contactId" }`. Any other property is ignored. Unknown or inactive tenants return 202 without calling GoHighLevel. A second nudge is not dropped; an unchanged metrics hash skips the write.
 - `api/cron/m10.ts` — daily M10 dispatcher. `GET` or `POST` with `Authorization: Bearer $CRON_SECRET`. Invokes one tenant function per active location.
-- `api/cron/m10-tenant.ts` — one tenant's win-back pass, with the same bearer check.
+- `api/cron/m10-tenant.ts` — one tenant's order reconcile, then its win-back pass, with the same bearer check.
 
 ## Webhook
 
@@ -41,7 +41,11 @@ Vercel invokes `GET /api/cron/m10` at 03:00 UTC (`0 3 * * *`). The handler rejec
 
 A tenant hop holds `m10:{locationId}:{YYYY-MM-DD}` for at least 360 seconds, longer than the 300 second function limit, and deletes that lock when the hop finishes, including when it throws. Another run the same local day is allowed once the lock is gone; the field writes are unchanged when the values already match. While the lock is held, a second hop skips that tenant. Contact search is paged with `searchAfter`. After 240 seconds the hop stores `m10cursor:{locationId}:{YYYY-MM-DD}` and schedules another call to the tenant route with `waitUntil` from `@vercel/functions`. The next hop starts at that cursor and does not repeat the earlier page.
 
-The cron does not re-fetch orders. It reads the M06 fields already on the contact:
+Before win-back eligibility, the tenant hop reconciles M06 for orders that changed recently. The test-lab account only has an Order Submitted workflow trigger, so a cancel, refund, or payment-status change on an existing order never calls the webhook. The hop lists `GET /payments/orders` with `altType=location` and `altId` (no `contactId`) and collects distinct contact ids whose `updatedAt`, or `createdAt` when `updatedAt` is missing, falls inside the last `M06_RECONCILE_HOURS` (default 48). Each contact runs the same recompute as the webhook: the per-contact lock, the metrics hash write-skip, and the per-location rate limiter. Order payloads are not logged.
+
+List Orders has no sort parameter. The scan pages with `offset` until `totalCount`, and stops after 30 pages. Hitting that cap logs a warning and the hop still runs eligibility for the contacts it already refreshed. `startAt` is not used, because the API does not define it as an `updatedAt` window. When the hop's time budget runs out during the scan, it stores `m06reconcile:{locationId}:{YYYY-MM-DD}` with the next offset and the contact ids already handled, and the same `waitUntil` continuation resumes the scan. A finished scan is remembered for 36 hours so a later pass the same local day does not list orders again.
+
+Eligibility for a contact refreshed in this hop uses those freshly computed values (`qualifying_order_count`, `total_orders`, `last_order_date`, and `typical_order_interval_days`), including when the hash was unchanged and the contact update was skipped. Every other contact still uses the M06 fields already stored on the contact:
 
 - qualifying count from `qualifying_order_count`, falling back to `total_orders`
 - days since the last order, recomputed from `last_order_date` and today's date in the tenant timezone
@@ -49,7 +53,7 @@ The cron does not re-fetch orders. It reads the M06 fields already on the contac
 
 A contact is eligible when the qualifying count is at least 3, days since the last order are at least 21, the typical interval is greater than 0, and `days_since_last / typical` rounds to at least 1.5. Tier is `High` at 2.0 or more and `Medium` otherwise. Anyone else who already has order history is `Not Eligible` / `None`. Contacts with no qualifying count and no last order date are left alone. Contacts whose `winback_cycle_status` is `In Progress` are skipped.
 
-The only fields written are `winback_eligibility` and `winback_tier`, and only when those values change. `winback_cycle_status` and `winback_cycle_started_at` are never written.
+The eligibility pass writes only `winback_eligibility` and `winback_tier`, and only when those values change. The reconcile above is what writes M06 fields. `winback_cycle_status` and `winback_cycle_started_at` are never written.
 
 `M10_ENROLL_ENABLED=true` adds an eligible contact to the tenant's `m10_workflow_id`. The flag defaults off. Enrollment is recorded on its own key, `m10enroll:{locationId}:{contactId}`, for 180 days. The eligibility fields are still written when the workflow call fails. A later run retries that call until it succeeds, including when the contact is already `Eligible` and including a later pass on the same local day. The marker is removed when the contact is not eligible, so a later cycle can enroll again. A recorded success is not repeated while the marker is present.
 
@@ -59,6 +63,7 @@ The only fields written are `winback_eligibility` and `winback_tier`, and only w
 - The calculator parsed `last_order_date` with `new Date(...)` and then converted to `Africa/Cairo`. A stored DATE field is a calendar year-month-day with no tenant-timezone conversion: `YYYY-MM-DD`, legacy `MM-DD-YYYY`, any ISO timestamp by its UTC day, or epoch milliseconds as that UTC day. `2026-10-21T00:00:00.000Z` stays 2026-10-21 in America/Chicago.
 - The calculator can emit `daysOverdue`. The cron does not write it. M06 already writes `days_overdue`, rounded to two decimals.
 - Tier stays `None` unless the contact is eligible. That matches the calculator and not the M06 resolver, which assigned a tier from the ratio alone.
+- Contacts whose orders were updated inside `M06_RECONCILE_HOURS` are recomputed before eligibility. The calculator read whatever was already stored. Contacts outside that window still use the stored fields.
 
 ## Environment
 
@@ -87,6 +92,7 @@ Copy `.env.example` to `.env.local`. Values are names only; do not commit secret
 | `CRON_SECRET` | yes, for the cron | Bearer token Vercel Cron sends |
 | `GHL_API_BASE_URL` | no | Defaults to `https://services.leadconnectorhq.com`. Version header is `2021-07-28`. |
 | `M10_ENROLL_ENABLED` | no | `true` enrolls newly eligible contacts into `m10_workflow_id`. Default off. |
+| `M06_RECONCILE_HOURS` | no | How many hours of order updates the daily cron recomputes before eligibility. Default 48. Invalid values use 48. |
 
 The Vercel Marketplace also injects `POSTGRES_URL`, `KV_URL`, `REDIS_URL`, and `KV_REST_API_READ_ONLY_TOKEN`. This service does not read those.
 
@@ -200,13 +206,14 @@ The workflow owns `winback_cycle_status` and `winback_cycle_started_at`. This se
 | `rerun:{locationId}:{contactId}` | 120s | A nudge arrived during the lock and must be computed again |
 | `m10:{locationId}:{YYYY-MM-DD}` | at least 360 seconds, released when the hop finishes | One in-flight M10 hop per location. The date is the tenant's calendar day. The TTL is longer than the 300 second function limit. |
 | `m10cursor:{locationId}:{YYYY-MM-DD}` | 2 hours | `searchAfter` cursor when a tenant hop stops for the time budget. |
+| `m06reconcile:{locationId}:{YYYY-MM-DD}` | 36 hours when the scan finishes, 2 hours while a cursor is in progress | Order-update reconcile for that local day. The in-progress value is the next offset and the contact ids already recomputed. |
 | `m10enroll:{locationId}:{contactId}` | 180 days | Workflow enrollment already succeeded for this eligibility stretch. Deleted when the contact is not eligible. |
 
 `YYYY-MM-DD` is the date in the tenant timezone.
 
 ## GoHighLevel client
 
-Orders: `GET /payments/orders` with `locationId`, `altId`, `altType=location`, `contactId`, `limit`, and `offset`. Pages continue until `totalCount` is covered. The client does not issue one `limit=500` request. A page cap throws instead of writing metrics from a partial history. Orders for a different `contactId` are dropped. `fixtures/list-orders-sample.json` is a redacted live list payload: `amount` is major units after discount, `paymentStatus` and `liveMode` are present, and `markAsTest` is absent. The list does not include checkout type. The latest qualifying order is then read with `GET /payments/orders/{orderId}?altType=location&altId=`, which is where `delivery.method` lives. That call uses the same per-location spacing and timeout as other reads. `fixtures/order-detail-shipping.json`, `fixtures/order-detail-pickup.json`, and `fixtures/order-detail-no-delivery.json` are redacted detail payloads with no contact snapshot.
+Orders: `GET /payments/orders` with `locationId`, `altId`, `altType=location`, `contactId`, `limit`, and `offset`. Pages continue until `totalCount` is covered. The client does not issue one `limit=500` request. A page cap throws instead of writing metrics from a partial history. Orders for a different `contactId` are dropped. The daily reconcile uses the same path without `contactId` and reads one page at a time. That list has no sort parameter. `fixtures/list-orders-sample.json` is a redacted live list payload: `amount` is major units after discount, `paymentStatus` and `liveMode` are present, and `markAsTest` is absent. The list does not include checkout type. The latest qualifying order is then read with `GET /payments/orders/{orderId}?altType=location&altId=`, which is where `delivery.method` lives. That call uses the same per-location spacing and timeout as other reads. `fixtures/order-detail-shipping.json`, `fixtures/order-detail-pickup.json`, and `fixtures/order-detail-no-delivery.json` are redacted detail payloads with no contact snapshot.
 
 Contacts for the cron: `POST /contacts/search` with `pageLimit` and `searchAfter`. `fixtures/contact-search-dates.json` is a redacted search page whose `last_order_date` values are `YYYY-MM-DD`, `YYYY-MM-DDT00:00:00.000Z`, `MM-DD-YYYY`, and epoch milliseconds.
 
