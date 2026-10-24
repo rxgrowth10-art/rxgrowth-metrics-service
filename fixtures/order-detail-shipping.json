@@ -1,0 +1,16 @@
+{
+  "order": {
+    "id": "order_detail_shipping",
+    "contactId": "contact_redacted",
+    "status": "completed",
+    "paymentStatus": "paid",
+    "fulfillmentStatus": "unfulfilled",
+    "liveMode": true,
+    "markAsTest": false,
+    "amount": 40,
+    "currency": "EGP",
+    "sourceSubType": "store",
+    "createdAt": "2026-10-21T18:47:57.185Z",
+    "delivery": { "method": "shipping" }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "data": [
+    {
+      "_id": "order_sample_1",
+      "altId": "loc_test",
+      "altType": "location",
+      "contactId": "contact_sample",
+      "currency": "EGP",
+      "amount": 93.5,
+      "subtotal": 110,
+      "discount": 16.5,
+      "status": "completed",
+      "paymentStatus": "unpaid",
+      "liveMode": true,
+      "sourceType": "website",
+      "sourceSubType": "store",
+      "fulfillmentStatus": "unfulfilled",
+      "createdAt": "2026-10-21T18:47:57.185Z",
+      "updatedAt": "2026-10-21T18:48:10.000Z",
+      "couponCode": null,
+      "totalProducts": 2
+    },
+    {
+      "_id": "order_sample_2",
+      "altId": "loc_test",
+      "altType": "location",
+      "contactId": "contact_sample",
+      "currency": "EGP",
+      "amount": 40,
+      "subtotal": 40,
+      "discount": 0,
+      "status": "completed",
+      "paymentStatus": "paid",
+      "liveMode": true,
+      "sourceType": "website",
+      "sourceSubType": "store",
+      "fulfillmentStatus": "unfulfilled",
+      "createdAt": "2026-10-22T09:00:00.000Z",
+      "updatedAt": "2026-10-22T09:05:00.000Z",
+      "couponCode": null,
+      "totalProducts": 1
+    }
+  ],
+  "totalCount": 2
+}

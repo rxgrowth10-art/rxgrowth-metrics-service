@@ -2,7 +2,7 @@
 
 Multi-tenant customer metrics for restaurant locations on GoHighLevel. A workflow Webhook action sends `locationId` and `contactId`. This service loads that tenant's API key, re-fetches the contact's orders, computes metrics, and writes them back to contact custom fields.
 
-This revision is the foundation: field contract, tenant store, GoHighLevel client, idempotency, and health check. The M06 webhook and the M10 daily cron are the next changes on top of these modules. Nothing here calls GoHighLevel or provisions a Vercel project.
+This revision adds the M06 webhook on top of the foundation. The M10 daily cron is the next change. Nothing here calls GoHighLevel or provisions a Vercel project.
 
 ## Layout
 
@@ -15,10 +15,24 @@ This revision is the foundation: field contract, tenant store, GoHighLevel clien
 - `migrations/001_tenants.sql` — Neon schema.
 - `fixtures/test-lab-fields.json` — final custom-field snapshot for location `ekxOqjUKW7M6OV9XAVnx`.
 
-Planned handlers, built on this foundation:
+- `api/webhooks/ghl.ts` — M06 nudge. `POST` JSON `{ "locationId", "contactId" }`. Any other property is ignored. Unknown or inactive tenants return 202 without calling GoHighLevel. A second nudge is not dropped; an unchanged metrics hash skips the write.
+- `api/cron/m10.ts` — daily win-back pass, still to be added. It will require `Authorization: Bearer $CRON_SECRET`.
 
-- `api/webhooks/ghl.ts` — M06. Accepts only `locationId` and `contactId`, returns 202, ignores every other payload value.
-- `api/cron/m10.ts` — daily win-back pass, authorized with `Authorization: Bearer $CRON_SECRET`.
+## Webhook
+
+```bash
+curl -X POST 'https://<deployment>/api/webhooks/ghl?t=TENANT_WEBHOOK_TOKEN' \
+  -H 'content-type: application/json' \
+  -d '{"locationId":"LOCATION_ID","contactId":"CONTACT_ID"}'
+```
+
+The handler returns 202 after it re-fetches orders and either writes metrics or skips an unchanged hash. It returns 400 when `locationId` or `contactId` is missing, 401 when the tenant's `?t=` token does not match `webhook_token_hash`, and 500 when processing fails so the sender can retry. A tenant with no hash is rejected in every environment, including Preview. The payload is only a signal. There is no shared webhook secret: a standard GoHighLevel Webhook action cannot set headers, so each location's workflow URL carries that tenant's token. Query strings are stripped from logs.
+
+A nudge with no `eventId` is always computed, guarded by a 30 second per-contact lock. If a second nudge arrives while that lock is held, it is queued and the in-flight run computes once more after it finishes, so a new order a few seconds later is not dropped. An explicit `eventId` or `webhookId` is still deduped for 300 seconds.
+
+List items that already include `paymentStatus` and `liveMode` are used as-is. `markAsTest` is often absent and then means not a test order. If `paymentStatus` or `liveMode` is missing, the service fetches `GET /payments/orders/{orderId}` with `altId` and `altType=location` before applying the qualifying rule. Orders whose `contactId` is some other contact are dropped. `altId` and `altType=location` are sent on every order request.
+
+M06 never writes `winback_eligibility` or `winback_tier`.
 
 ## Environment
 
@@ -39,7 +53,7 @@ Copy `.env.example` to `.env.local`. Values are names only; do not commit secret
 | `TENANT_CURRENCY` | no | Defaults to `USD`. Stored only; amounts are not rescaled. |
 | `TENANT_M10_WORKFLOW_ID` | no | Workflow id used when M10 enrollment is enabled. |
 | `TENANT_ACTIVE` | no | `false` or `0` disables the tenant. Defaults to active. |
-| `TENANT_WEBHOOK_TOKEN_HASH` | production webhook | SHA-256 hex of this tenant's webhook query token. Also accepted as `webhookTokenHash` inside `TENANT_CONFIG`. |
+| `TENANT_WEBHOOK_TOKEN_HASH` | webhook | SHA-256 hex of this tenant's webhook query token. Required in every environment, including Preview. Also accepted as `webhookTokenHash` inside `TENANT_CONFIG`. |
 | `KV_REST_API_URL` | required when `VERCEL_ENV=production` | Upstash Redis REST URL (Vercel KV name). Production fails closed when this pair is missing. |
 | `KV_REST_API_TOKEN` | required when `VERCEL_ENV=production` | Upstash Redis REST token (Vercel KV name). |
 | `UPSTASH_REDIS_REST_URL` | fallback | Used only together with `UPSTASH_REDIS_REST_TOKEN`, and only when the `KV_REST_API_*` pair is unset. |
@@ -125,7 +139,7 @@ Put the hash on the tenant. Put the token only in the workflow URL:
 https://<deployment>/api/webhooks/ghl?t=<token>
 ```
 
-Rotate by generating a new pair and replacing that tenant's hash. The previous token stops matching as soon as the hash is saved. In production (`VERCEL_ENV=production`) a tenant with no hash is rejected. Outside production, a missing hash leaves the check off so local tests can run. When a hash is set, it is required in every environment.
+Rotate by generating a new pair and replacing that tenant's hash. The previous token stops matching as soon as the hash is saved. A tenant with no hash is rejected in every environment, including Preview and local runs.
 
 Regenerate the field catalog after a fixture change:
 
@@ -133,7 +147,7 @@ Regenerate the field catalog after a fixture change:
 npm run generate:fields
 ```
 
-Runtime writes resolve custom-field ids with `GET /locations/{locationId}/customFields?model=contact` and match `fieldKey`. The ids in `src/schema/fields.ts` are the test-lab reference, not ids to send for other locations.
+Runtime writes resolve custom-field ids with `GET /locations/{locationId}/customFields?model=contact` and match `fieldKey`. The key-to-id map is cached per location in Redis for 10 minutes. A missing key or an HTTP 400/422 from the contact update drops that cache and loads the list once more. The ids in `src/schema/fields.ts` are the test-lab reference, not ids to send for other locations.
 
 ## Field contract
 
@@ -143,7 +157,9 @@ M06 writes these keys (and does not write win-back eligibility):
 
 `total_orders`, `qualifying_order_count`, `first_order_date`, `last_order_date`, `lifetime_value`, `average_order_value`, `highest_order_value`, `lowest_order_value`, `customer_type`, `customer_status`, `lifecycle_stage`, `last_order_location`, `last_order_type`, `average_order_interval_days`, `typical_order_interval_days`, `orders_last_30_days`, `orders_previous_30_days`, `spend_last_30_days`, `spend_previous_30_days`, `order_frequency_trend`, `spending_trend`, `days_since_last_order`, `expected_next_order_date`, `days_overdue`, `overdue_ratio`, `metrics_hash`, `m06_intelligence_updated_at`.
 
-`metrics_hash` is a sha256 of the written values. `m06_intelligence_updated_at` is excluded from that hash so an unchanged metric set can skip the contact update entirely.
+`metrics_hash` is a sha256 of the formatted values M06 would write, including `last_order_type` (an empty string when that field is left off the contact update). `m06_intelligence_updated_at` is excluded from that hash. When the stored hash matches, the contact `PUT` is skipped entirely, which stops a Contact Changed workflow from looping on its own write. The timestamp therefore moves only when some other written value changes.
+
+`average_order_interval_days` is the mean of the collapsed intervals. `typical_order_interval_days` is the median. `days_overdue` and `overdue_ratio` are rounded to two decimals. `total_orders` and `qualifying_order_count` are the same full qualifying count. Zero qualifying orders write `lifecycle_stage` as `NO QUALIFYING ORDERS`. `last_order_type` is the customer's checkout choice on the latest qualifying order. The list payload does not include it. After qualifying orders are filtered, the service fetches `GET /payments/orders/{orderId}` with `altId` and `altType=location` for that one order. `delivery.method` `shipping` is written as Delivery and `pickup` as Pickup. Any other method, or a missing `delivery` object, is omitted from the contact update. Shipping fees, shipping rates, and payment method names are not used. If that detail says `markAsTest` is true, the order is excluded and the next latest qualifying order is fetched, up to three detail calls. A failed detail omits `last_order_type` and does not fail the webhook. The detail body is not logged. `last_order_location` comes from `sourceName`. Order dates are written as `YYYY-MM-DD` in the tenant timezone. A stored DATE field is read as a calendar date: `YYYY-MM-DD`, legacy `MM-DD-YYYY`, the ISO midnight UTC string contact search returns (`2026-10-21T00:00:00.000Z`) by its UTC year-month-day, or epoch milliseconds as that UTC calendar date. Those stored values are not shifted into the tenant timezone.
 
 M10 writes only `winback_eligibility` and `winback_tier`.
 
@@ -153,21 +169,40 @@ The workflow owns `winback_cycle_status` and `winback_cycle_started_at`. This se
 
 | Key | TTL | Meaning |
 | --- | --- | --- |
-| `evt:{locationId}:{contactId}:{eventId-or-derived}` | 300s | One webhook computation per event |
+| `evt:{locationId}:{contactId}:{eventId}` | 300s | Only when the payload includes `eventId` or `webhookId`. A derived contact hash is not used. |
 | `lock:{locationId}:{contactId}` | 30s | One in-flight computation per contact |
+| `rerun:{locationId}:{contactId}` | 120s | A nudge arrived during the lock and must be computed again |
 | `m10:{locationId}:{YYYY-MM-DD}` | through the tenant's calendar day | One daily cron pass per location |
 
 `YYYY-MM-DD` is the date in the tenant timezone.
 
 ## GoHighLevel client
 
-Orders: `GET /payments/orders` with `locationId`, `altId`, `altType=location`, `contactId`, `limit`, and `offset`. Pages continue until `totalCount` is covered. The client does not issue one `limit=500` request. A page cap throws instead of writing metrics from a partial history.
+Orders: `GET /payments/orders` with `locationId`, `altId`, `altType=location`, `contactId`, `limit`, and `offset`. Pages continue until `totalCount` is covered. The client does not issue one `limit=500` request. A page cap throws instead of writing metrics from a partial history. Orders for a different `contactId` are dropped. `fixtures/list-orders-sample.json` is a redacted live list payload: `amount` is major units after discount, `paymentStatus` and `liveMode` are present, and `markAsTest` is absent. The list does not include checkout type. The latest qualifying order is then read with `GET /payments/orders/{orderId}?altType=location&altId=`, which is where `delivery.method` lives. That call uses the same per-location spacing and timeout as other reads. `fixtures/order-detail-shipping.json`, `fixtures/order-detail-pickup.json`, and `fixtures/order-detail-no-delivery.json` are redacted detail payloads with no contact snapshot.
 
-Contacts for the cron: `POST /contacts/search` with `pageLimit` and `searchAfter`.
+Contacts for the cron: `POST /contacts/search` with `pageLimit` and `searchAfter`. `fixtures/contact-search-dates.json` is a redacted search page whose `last_order_date` values are `YYYY-MM-DD`, `YYYY-MM-DDT00:00:00.000Z`, `MM-DD-YYYY`, and epoch milliseconds.
 
 Custom fields: `PUT /contacts/{contactId}` sends `{ id, key, field_value }` for the fields being changed.
 
 Per-location spacing defaults to 100ms between requests on a warm instance. It is process-local. Idempotent reads retry HTTP 429, HTTP 5xx, and network failures with exponential backoff and jitter, capped at 20 seconds. `Retry-After` is honored up to 60 seconds. Workflow enrollment `POST` is not retried.
+
+## Divergences from the STENZ custom code
+
+The attached M06 resolver is the starting point. These locked rules replace it:
+
+- Qualifying orders are `liveMode && !markAsTest && amount > 0`, with order status other than `cancelled`, `refunded`, or `partially_refunded`, and `paymentStatus` in `paid`, `unpaid`, or `partially_paid`. The resolver instead required `status === "completed"` and ignored payment status, so a completed refunded order qualified and an unpaid COD order only qualified when its status was exactly `completed`. Fulfillment status still does not disqualify an order. The resolver also required `contactId`; this service does not, because orders are already fetched for one contact.
+- `total_orders`, `qualifying_order_count`, and lifetime value count every qualifying order. Interval math collapses orders that share a calendar day in the tenant timezone, so there are no 0-day gaps. The resolver pushed a 0-day interval for same-day orders. Two orders on day 1 and one on day 11 are 3 orders and intervals `[10]`. Three orders on one day produce `intervals = []`, `typical_order_interval_days` empty, and `overdue_ratio` empty.
+- The resolver computed win-back eligibility inside M06 (`>= 2` orders, no 21-day minimum) and a tier even when the contact was not eligible. M06 here does not write eligibility or tier. The daily cron will use the M10 calculator rule.
+- The resolver left `daysOverdue` unrounded. Values here are rounded to two decimals, including inside M06.
+- The resolver set `lastOrderType` to null on purpose. It is the checkout `delivery.method` on the latest qualifying order's detail: `shipping` writes Delivery and `pickup` writes Pickup. Any other value, including a missing `delivery` object, `sourceSubType`, a shipping fee, or a payment method name, is left off the contact update. A detail `markAsTest: true` excludes that order and the next latest is tried, up to three detail calls.
+- The resolver's last lifecycle label was `LOST / DORMANT`. The field is written as `LOST`. Zero qualifying orders stay `NO QUALIFYING ORDERS`, which is the resolver's label and is not one of the six non-empty stages.
+- `qualifying_order_count`, `lifecycle_stage`, and `metrics_hash` were not written by the resolver. They are written now. `m06_intelligence_updated_at` is the updated-at field. There is no `metrics_updated_at`.
+- The resolver's contact update reformatted dates to `MM-DD-YYYY`. DATE custom fields are written as `YYYY-MM-DD`. Contact search returns those same fields as ISO midnight UTC, and a legacy value may still be `MM-DD-YYYY`. Reading a stored DATE field takes the UTC calendar date for midnight-Z and epoch milliseconds, so a negative-offset tenant does not move the day backward. `MM-DD-YYYY` is accepted on read.
+- The resolver loaded orders with one `limit=500` request. Orders are paged with `offset` until `totalCount`.
+- `total_orders` stays the qualifying count, matching the resolver. `qualifying_order_count` is that same full count, not the count of distinct days.
+- The mapping note cited overdue-ratio id `utMAZhK2y8laZAfqAJXb`. The test-lab snapshot id is `PysK1ynJ47hCLa8y2G6u`. Runtime mapping uses the key, and the snapshot is the id fixture.
+
+Preserved from the resolver: average interval is the mean, typical interval is the median, customer type/status bands, 30-day trend comparison, and trailing-12-month frequency labels (those labels are computed and not written; no contact field is assigned to them).
 
 ## Checks
 

@@ -1,0 +1,17 @@
+{
+  "order": {
+    "id": "order_detail_no_delivery",
+    "contactId": "contact_redacted",
+    "status": "completed",
+    "paymentStatus": "unpaid",
+    "fulfillmentStatus": "unfulfilled",
+    "liveMode": true,
+    "markAsTest": false,
+    "amount": 40,
+    "currency": "EGP",
+    "sourceSubType": "store",
+    "createdAt": "2026-10-21T12:00:00.000Z",
+    "shippingRate": { "name": "Delivery fee", "amount": 15 },
+    "paymentMethod": "Cash on Delivery"
+  }
+}

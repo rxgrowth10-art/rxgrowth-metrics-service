@@ -5,7 +5,7 @@ export interface Tenant {
   timezone: string;
   currency: string;
   m10WorkflowId: string | null;
-  /** SHA-256 hex of the per-tenant webhook query token. Null disables the check outside production. */
+  /** SHA-256 hex of the per-tenant webhook query token. Null rejects the webhook in every environment. */
   webhookTokenHash: string | null;
   active: boolean;
 }

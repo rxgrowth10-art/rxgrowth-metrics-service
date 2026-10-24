@@ -9,6 +9,8 @@ export interface GhlOrder {
   amount: number | string | null;
   sourceName: string | null;
   sourceSubType: string | null;
+  /** Checkout choice from order detail `delivery.method`. Absent on the list payload. */
+  deliveryMethod: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   currency: string | null;
