@@ -8,7 +8,7 @@ This revision is the foundation: field contract, tenant store, GoHighLevel clien
 
 - `api/health.ts` — liveness check.
 - `src/schema/fields.ts` — generated catalog of the RX Test Lab custom fields, keyed for runtime lookup. Test-lab ids are fixtures only.
-- `src/tenants/` — `TenantStore` with a Neon implementation and an in-memory implementation. API keys are AES-256-GCM ciphertext.
+- `src/tenants/` — `TenantStore`. `TENANT_STORE=neon` uses Neon Postgres. `TENANT_STORE=env` loads one tenant from the environment for the test phase. API keys are AES-256-GCM ciphertext. Tests use the in-memory store.
 - `src/ghl/` — HTTP client. Timeout, retry with backoff on 429 and 5xx, per-location spacing, order pages via `offset`, contact search via `searchAfter`.
 - `src/idempotency/` — `SET NX` with TTL. Upstash Redis when configured, memory otherwise.
 - `src/time/business-date.ts` — tenant-timezone calendar dates.
@@ -26,8 +26,18 @@ Copy `.env.example` to `.env.local`. Values are names only; do not commit secret
 
 | Name | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | yes, in production | Neon Postgres connection string |
+| `TENANT_STORE` | no | `neon` (default) or `env`. Selects where tenant records are loaded from. |
+| `DATABASE_URL` | when `TENANT_STORE=neon` | Neon Postgres connection string |
 | `TENANT_ENCRYPTION_KEY` | yes | 32-byte key, base64 or 64-char hex, for tenant API keys |
+| `TENANT_CONFIG` | `env` store, one of two forms | JSON object for the single test-phase tenant. When set, discrete `TENANT_*` fields below are ignored. |
+| `TENANT_LOCATION_ID` | `env` store, if `TENANT_CONFIG` is unset | Location id of the single tenant |
+| `TENANT_NAME` | no | Display name. Defaults to the location id. |
+| `TENANT_API_KEY` | `env` store, one key form | Plaintext GoHighLevel token. Encrypted in memory with `TENANT_ENCRYPTION_KEY`. Do not set this together with `TENANT_API_KEY_ENCRYPTED`. |
+| `TENANT_API_KEY_ENCRYPTED` | `env` store, the other key form | `v1:` ciphertext from `scripts/encrypt-api-key.mjs`. |
+| `TENANT_TIMEZONE` | no | IANA timezone. Defaults to `UTC`. |
+| `TENANT_CURRENCY` | no | Defaults to `USD`. Stored only; amounts are not rescaled. |
+| `TENANT_M10_WORKFLOW_ID` | no | Workflow id used when M10 enrollment is enabled. |
+| `TENANT_ACTIVE` | no | `false` or `0` disables the tenant. Defaults to active. |
 | `UPSTASH_REDIS_REST_URL` | production | Upstash Redis REST URL |
 | `UPSTASH_REDIS_REST_TOKEN` | production | Upstash Redis REST token |
 | `CRON_SECRET` | yes, for the cron | Bearer token Vercel Cron sends |
@@ -38,6 +48,10 @@ Copy `.env.example` to `.env.local`. Values are names only; do not commit secret
 Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, `secret`, and bearer strings. Do not log tenant API keys.
 
 ## Add a tenant
+
+`TENANT_STORE` selects the backend. `neon` is the multi-tenant store. `env` is a single-tenant store for the test phase and does not need `DATABASE_URL`. Both decrypt the API key only in memory for the GoHighLevel call. Unknown or inactive locations do no work.
+
+### Neon (`TENANT_STORE=neon`)
 
 1. Apply `migrations/001_tenants.sql` to the Neon database.
 2. Encrypt the location's GoHighLevel private-integration token. The token is read from stdin and is not passed as an argument:
@@ -63,7 +77,29 @@ INSERT INTO tenants (
 );
 ```
 
-Unknown or inactive locations do no work. Keys are decrypted only in memory for the GoHighLevel call.
+### Environment (`TENANT_STORE=env`)
+
+One tenant, either as JSON or as discrete variables. `upsert` changes the process copy only.
+
+```bash
+TENANT_STORE=env
+TENANT_CONFIG={"locationId":"LOCATION_ID","name":"Restaurant name","apiKey":"pit-...","timezone":"Africa/Cairo","currency":"EGP","m10WorkflowId":null,"active":true}
+```
+
+The same tenant as discrete variables, with a ciphertext key:
+
+```bash
+TENANT_STORE=env
+TENANT_LOCATION_ID=LOCATION_ID
+TENANT_NAME=Restaurant name
+TENANT_API_KEY_ENCRYPTED=v1:...
+TENANT_TIMEZONE=Africa/Cairo
+TENANT_CURRENCY=EGP
+TENANT_M10_WORKFLOW_ID=
+TENANT_ACTIVE=true
+```
+
+`apiKey` and `apiKeyEncrypted` are mutually exclusive. A plaintext `apiKey` is encrypted with `TENANT_ENCRYPTION_KEY` before the rest of the service sees it.
 
 Regenerate the field catalog after a fixture change:
 
