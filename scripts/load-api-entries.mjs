@@ -1,5 +1,5 @@
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const root = process.argv[2];
@@ -42,6 +42,7 @@ for (const file of files) {
     process.stderr.write(`${code}\n${message}\n`);
     process.exit(1);
   }
+  process.stdout.write(`${relative(root, file).split("\\").join("/")}\n`);
 }
 
 process.stdout.write(`loaded ${files.length}\n`);
