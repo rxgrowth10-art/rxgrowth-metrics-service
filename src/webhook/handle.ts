@@ -1,16 +1,19 @@
+import { createHash } from "node:crypto";
 import type { GhlClient } from "../ghl/index.js";
-import { hydrateOrders } from "../ghl/hydrate-orders.js";
-import { applyLatestOrderDetail } from "../ghl/latest-order-detail.js";
 import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token.js";
 import { json } from "../http/json.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
 import { log } from "../log/logger.js";
 import { decryptApiKey, type Tenant, type TenantStore } from "../tenants/index.js";
-import { writeM06Metrics } from "../writeback/m06.js";
+import {
+  CONTACT_LOCK_TTL_SECONDS,
+  CONTACT_RERUN_TTL_SECONDS,
+  contactLockKey,
+  contactRerunKey,
+  recomputeM06Contact,
+} from "../writeback/recompute.js";
 
 const EVENT_TTL_SECONDS = 300;
-const LOCK_TTL_SECONDS = 30;
-const RERUN_TTL_SECONDS = 120;
 
 export interface WebhookDeps {
   tenants: TenantStore;
@@ -37,11 +40,6 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
   if (!ids) return json({ error: "locationId and contactId are required" }, 400);
 
   const tenant = await deps.tenants.getByLocationId(ids.locationId);
-  if (!tenant || !tenant.active) {
-    const reason = tenant ? "inactive_tenant" : "unknown_tenant";
-    log("info", "webhook.skipped", { locationId: ids.locationId, contactId: ids.contactId, reason });
-    return json({ accepted: false, reason }, 202);
-  }
   if (!authorized(request, tenant)) {
     log("warn", "webhook.unauthorized", { locationId: ids.locationId, contactId: ids.contactId });
     return json({ error: "unauthorized" }, 401);
@@ -54,10 +52,10 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
     return json({ accepted: true, duplicate: true }, 202);
   }
 
-  const lockKey = `lock:${ids.locationId}:${ids.contactId}`;
-  const rerunKey = `rerun:${ids.locationId}:${ids.contactId}`;
-  if (!(await deps.idempotency.setNx(lockKey, LOCK_TTL_SECONDS))) {
-    await deps.idempotency.set(rerunKey, "1", RERUN_TTL_SECONDS);
+  const lockKey = contactLockKey(ids.locationId, ids.contactId);
+  const rerunKey = contactRerunKey(ids.locationId, ids.contactId);
+  if (!(await deps.idempotency.setNx(lockKey, CONTACT_LOCK_TTL_SECONDS))) {
+    await deps.idempotency.set(rerunKey, "1", CONTACT_RERUN_TTL_SECONDS);
     if (dedupeKey) await deps.idempotency.del(dedupeKey);
     log("info", "webhook.queued", { locationId: ids.locationId, contactId: ids.contactId });
     return json({ accepted: true, queued: true }, 202);
@@ -82,11 +80,26 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
     return json({ accepted: true, written: outcome.written }, 202);
   } finally {
     await deps.idempotency.del(lockKey);
-    if ((await deps.idempotency.get(rerunKey)) && (await deps.idempotency.setNx(lockKey, LOCK_TTL_SECONDS))) {
+    if ((await deps.idempotency.get(rerunKey)) && (await deps.idempotency.setNx(lockKey, CONTACT_LOCK_TTL_SECONDS))) {
+      let retry: { ok: true; written: boolean } | { ok: false; message: string } = {
+        ok: false,
+        message: "unknown",
+      };
       try {
-        await runUntilQuiet(ids, tenant, deps, rerunKey);
+        retry = await runUntilQuiet(ids, tenant, deps, rerunKey);
+      } catch (error) {
+        retry = { ok: false, message: error instanceof Error ? error.message : "unknown" };
       } finally {
         await deps.idempotency.del(lockKey);
+      }
+      if (!retry.ok) {
+        // runUntilQuiet clears the rerun flag before computing. Put it back so a failed trailing pass is not dropped.
+        await deps.idempotency.set(rerunKey, "1", CONTACT_RERUN_TTL_SECONDS);
+        log("error", "webhook.rerun_failed", {
+          locationId: ids.locationId,
+          contactId: contactLogRef(ids.contactId),
+          message: retry.message,
+        });
       }
     }
   }
@@ -118,32 +131,52 @@ async function compute(
 ): Promise<{ written: boolean }> {
   const apiKey = decryptApiKey(tenant.apiKeyEncrypted, deps.encryptionKey);
   const client = deps.ghlFactory({ apiKey, locationId: tenant.locationId });
-  const listed = await client.listOrders(ids.contactId);
-  const hydrated = await hydrateOrders(listed, (orderId) => client.getOrder(orderId));
-  const orders = await applyLatestOrderDetail(hydrated, (orderId) => client.getOrder(orderId));
-  return writeM06Metrics({
+  const result = await recomputeM06Contact({
     client,
     contactId: ids.contactId,
-    orders,
+    locationId: tenant.locationId,
     timeZone: tenant.timezone,
     now: deps.now(),
-    fieldCache: { store: deps.idempotency, locationId: tenant.locationId },
+    idempotency: deps.idempotency,
   });
+  return { written: result.written };
 }
 
-function authorized(request: Request, tenant: Tenant): boolean {
-  if (!tenant.webhookTokenHash) return false;
-  return webhookTokenMatches(readWebhookToken(request), tenant.webhookTokenHash);
+function authorized(request: Request, tenant: Tenant | null): tenant is Tenant {
+  const matches = webhookTokenMatches(readWebhookToken(request), tenant?.webhookTokenHash ?? null);
+  return Boolean(tenant?.active) && matches;
 }
 
+/** Short hash so a failure log can be correlated without writing the raw contact id. */
+function contactLogRef(contactId: string): string {
+  return createHash("sha256").update(contactId, "utf8").digest("hex").slice(0, 12);
+}
+
+function readString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * A standard GoHighLevel Webhook action posts the contact at the top level
+ * (`contact_id`, `location.id`) plus the action's key-value pairs under
+ * `customData`. The body is not logged; it contains contact PII.
+ */
 function readIds(body: unknown): { locationId: string; contactId: string } | null {
-  if (!body || typeof body !== "object") return null;
-  const record = body as Record<string, unknown>;
-  const locationId = record.locationId;
-  const contactId = record.contactId;
-  if (typeof locationId !== "string" || !locationId.trim()) return null;
-  if (typeof contactId !== "string" || !contactId.trim()) return null;
-  return { locationId: locationId.trim(), contactId: contactId.trim() };
+  const record = asRecord(body);
+  if (!record) return null;
+  const custom = asRecord(record.customData);
+  const location = asRecord(record.location);
+  const locationId = readString(custom?.locationId) ?? readString(record.locationId) ?? readString(location?.id);
+  const contactId = readString(custom?.contactId) ?? readString(record.contactId) ?? readString(record.contact_id);
+  if (!locationId || !contactId) return null;
+  return { locationId, contactId };
 }
 
 function readEventId(body: unknown): string | null {

@@ -27,6 +27,16 @@ export interface GhlContact {
   customFields: GhlContactField[];
 }
 
+export interface GhlContactPage {
+  contacts: GhlContact[];
+  searchAfter: unknown[] | null;
+}
+
+export interface GhlOrderPage {
+  orders: GhlOrder[];
+  totalCount: number | null;
+}
+
 export interface GhlCustomField {
   id: string;
   fieldKey: string;
@@ -42,10 +52,13 @@ export interface CustomFieldWrite {
 
 export interface GhlClient {
   listOrders(contactId: string): Promise<GhlOrder[]>;
+  /** One location-wide page. `GET /payments/orders` has no sort parameter. */
+  listLocationOrdersPage(offset: number): Promise<GhlOrderPage>;
   getOrder(orderId: string): Promise<GhlOrder | null>;
   getContact(contactId: string): Promise<GhlContact>;
   listCustomFields(): Promise<GhlCustomField[]>;
   updateContact(contactId: string, fields: readonly CustomFieldWrite[]): Promise<void>;
   searchContacts(): Promise<GhlContact[]>;
+  searchContactsPage(searchAfter: readonly unknown[] | null): Promise<GhlContactPage>;
   addContactToWorkflow(contactId: string, workflowId: string, eventStartTime?: string): Promise<void>;
 }

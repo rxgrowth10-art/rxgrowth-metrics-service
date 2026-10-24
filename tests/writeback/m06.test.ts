@@ -22,6 +22,9 @@ function clientWith(orders = [order({ amount: 25.5, deliveryMethod: "shipping" }
     async listOrders() {
       return orders;
     },
+    async listLocationOrdersPage() {
+      return { orders: [], totalCount: 0 };
+    },
     async getOrder() {
       return null;
     },
@@ -40,6 +43,9 @@ function clientWith(orders = [order({ amount: 25.5, deliveryMethod: "shipping" }
     },
     async searchContacts() {
       return [];
+    },
+    async searchContactsPage() {
+      return { contacts: [], searchAfter: null };
     },
     async addContactToWorkflow() {
       return undefined;

@@ -24,8 +24,10 @@ describe("compiled api entries", () => {
         status: 0,
       });
       expect(loaded.stderr).not.toContain("ERR_MODULE_NOT_FOUND");
-      const count = Number(loaded.stdout.trim().replace(/^loaded /, ""));
-      expect(count).toBeGreaterThanOrEqual(3);
+      expect(loaded.stdout).toContain("cron/m10-tenant.js");
+      const countLine = loaded.stdout.trim().split("\n").at(-1) ?? "";
+      const count = Number(countLine.replace(/^loaded /, ""));
+      expect(count).toBe(4);
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }

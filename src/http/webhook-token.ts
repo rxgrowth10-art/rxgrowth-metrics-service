@@ -1,6 +1,8 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+/** Stand-in so an unknown location still runs the constant-time compare. Fresh per process. */
+const DUMMY_WEBHOOK_HASH = randomBytes(32).toString("hex");
 
 export function hashWebhookToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
@@ -19,10 +21,10 @@ export function readWebhookToken(request: Request): string | null {
 }
 
 export function webhookTokenMatches(presented: string | null, expectedHash: string | null): boolean {
-  if (!presented || !expectedHash) return false;
-  const normalized = expectedHash.trim().toLowerCase();
-  if (!SHA256_HEX.test(normalized)) return false;
+  const normalized = expectedHash?.trim().toLowerCase() ?? "";
+  const hash = SHA256_HEX.test(normalized) ? normalized : DUMMY_WEBHOOK_HASH;
+  if (!presented) return false;
   const actual = Buffer.from(hashWebhookToken(presented), "hex");
-  const expected = Buffer.from(normalized, "hex");
+  const expected = Buffer.from(hash, "hex");
   return timingSafeEqual(actual, expected);
 }
