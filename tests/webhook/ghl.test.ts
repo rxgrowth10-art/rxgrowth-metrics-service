@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT } from "../../api/webhooks/ghl.js";
 import type { GhlClient } from "../../src/ghl/index.js";
@@ -33,6 +35,7 @@ function deps(options?: {
   ordersAt?: (call: number) => ReturnType<typeof order>[];
   active?: boolean;
   fail?: boolean;
+  failAt?: number;
   detail?: ReturnType<typeof order> | null;
   detailError?: Error;
   onFirstList?: () => Promise<void> | void;
@@ -48,7 +51,7 @@ function deps(options?: {
     async listOrders() {
       listCalls += 1;
       if (options?.onFirstList && listCalls === 1) await options.onFirstList();
-      if (options?.fail) throw new Error("upstream down");
+      if (options?.fail || (options?.failAt !== undefined && listCalls >= options.failAt)) throw new Error("upstream down");
       if (options?.ordersAt) return options.ordersAt(listCalls);
       return options?.orders ?? [order({ amount: 15, createdAt: "2026-01-11T00:00:00.000Z" })];
     },
@@ -338,6 +341,88 @@ describe("GHL webhook", () => {
     );
     expect(await duplicate.json()).toEqual({ accepted: true, duplicate: true });
     expect(harness.listCalls()).toBe(1);
+  });
+
+  it("logs a failed trailing recompute and puts the rerun flag back", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const harness = deps({ failAt: 2 });
+      await harness.tenants.upsert(tenant());
+      const store = harness.deps.idempotency;
+      const originalDel = store.del.bind(store);
+      let armed = true;
+      store.del = async (key) => {
+        await originalDel(key);
+        if (armed && key === "lock:loc_1:contact_1") {
+          armed = false;
+          await store.set("rerun:loc_1:contact_1", "1", 120);
+        }
+      };
+      const response = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+      expect(response.status).toBe(202);
+      expect(harness.listCalls()).toBe(2);
+      expect(await store.get("rerun:loc_1:contact_1")).toBe("1");
+      const text = errorLog.mock.calls.map((call) => String(call[0])).join("\n");
+      const contactRef = createHash("sha256").update("contact_1", "utf8").digest("hex").slice(0, 12);
+      expect(text).toContain("webhook.rerun_failed");
+      expect(text).toContain("loc_1");
+      expect(text).toContain(contactRef);
+      expect(text).toContain("upstream down");
+      expect(text).not.toContain("contact_1");
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it("reads a standard GoHighLevel webhook from customData, then location.id and contact_id", async () => {
+    const info = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const payload = JSON.parse(readFileSync(new URL("../../fixtures/ghl-standard-webhook.json", import.meta.url), "utf8")) as {
+        customData: { locationId: string; contactId: string };
+        location: { id: string };
+        contact_id: string;
+        email: string;
+      };
+      const harness = deps();
+      await harness.tenants.upsert(tenant());
+      const response = await handleGhlWebhook(post(payload), harness.deps);
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({ accepted: true, written: true });
+      expect(harness.seenKeys).toEqual(["loc_1:pit-plaintext"]);
+
+      const fallback = deps();
+      await fallback.tenants.upsert(tenant());
+      const { customData: _customData, ...withoutCustom } = payload;
+      const fallbackResponse = await handleGhlWebhook(post(withoutCustom), fallback.deps);
+      expect(fallbackResponse.status).toBe(202);
+      expect(fallback.seenKeys).toEqual(["loc_1:pit-plaintext"]);
+
+      const customWins = deps();
+      await customWins.tenants.upsert(tenant());
+      const customResponse = await handleGhlWebhook(
+        post({
+          contact_id: "other_contact",
+          email: payload.email,
+          location: { id: "other_loc", name: "Decoy" },
+          customData: { locationId: "loc_1", contactId: "c_from_custom" },
+        }),
+        customWins.deps,
+      );
+      expect(customResponse.status).toBe(202);
+      expect(customWins.seenKeys).toEqual(["loc_1:pit-plaintext"]);
+
+      const text = [info, warn, errorLog].flatMap((spy) => spy.mock.calls.map((call) => String(call[0]))).join("\n");
+      expect(text).not.toContain(payload.email);
+      expect(text).not.toContain("Pat Example");
+      expect(text).not.toContain("+15555550123");
+      expect(text).not.toContain("1 Example Street");
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+      errorLog.mockRestore();
+    }
   });
 
   it("returns 400 for a body that is not a location and contact nudge", async () => {

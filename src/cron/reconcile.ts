@@ -11,6 +11,13 @@ export const MAX_RECONCILE_PAGES = 30;
 export const DEFAULT_FULL_RECONCILE_WEEKDAY = "friday";
 /** Safety stop for the weekly scan. 500 pages at limit 100 is 50,000 orders. */
 export const FULL_RECONCILE_PAGE_CAP = 500;
+/**
+ * Contact ids kept on an in-progress cursor. The most recent ids are kept so a
+ * mid-page resume does not repeat the page it just handled. An older id that
+ * falls out of this window can be recomputed if that contact appears again;
+ * the metrics hash makes a repeat write a no-op.
+ */
+export const MAX_CURSOR_SEEN = 2000;
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
 const RECONCILE_DONE_TTL_SECONDS = 60 * 60 * 36;
 const RECONCILE_CURSOR_TTL_SECONDS = 60 * 60 * 2;
@@ -74,7 +81,8 @@ export function orderTouchesWindow(order: { updatedAt?: string | null; createdAt
  * on an older order. The daily scan keeps offset order, limit 100, and the
  * updatedAt filter, and stops after the page cap. On the configured weekday in
  * the tenant timezone the same hop scans every contact instead, up to the
- * safety page cap, and stores progress on `m06full`.
+ * safety page cap, and stores progress on `m06full`. The in-progress cursor
+ * keeps at most {@link MAX_CURSOR_SEEN} contact ids.
  */
 export async function reconcileRecentOrders(args: {
   client: GhlClient;
@@ -127,7 +135,7 @@ export async function reconcileRecentOrders(args: {
       }
       if (!progressed || !overBudget()) continue;
       if (pendingLater(page.orders, index + 1, now(), hours, seen, full)) {
-        await saveCursor(args.idempotency, key, { offset, seen: [...seen] });
+        await saveCursor(args.idempotency, key, { offset, seen: boundedSeen(seen, seenCap(args.deps)) });
         return true;
       }
     }
@@ -162,7 +170,7 @@ export async function reconcileRecentOrders(args: {
     }
     offset = nextOffset;
     if (overBudget()) {
-      await saveCursor(args.idempotency, key, { offset, seen: [...seen] });
+      await saveCursor(args.idempotency, key, { offset, seen: boundedSeen(seen, seenCap(args.deps)) });
       return true;
     }
   }
@@ -213,6 +221,17 @@ async function readReconcileCursor(store: IdempotencyStore, key: string): Promis
   } catch {
     return null;
   }
+}
+
+function seenCap(deps: M10Deps): number {
+  const cap = deps.cursorSeenCap ?? MAX_CURSOR_SEEN;
+  return cap > 0 ? cap : MAX_CURSOR_SEEN;
+}
+
+function boundedSeen(seen: ReadonlySet<string>, cap: number): string[] {
+  const ids = [...seen];
+  if (ids.length <= cap) return ids;
+  return ids.slice(ids.length - cap);
 }
 
 async function saveCursor(store: IdempotencyStore, key: string, cursor: ReconcileCursor): Promise<void> {

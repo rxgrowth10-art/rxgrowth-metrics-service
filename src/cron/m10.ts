@@ -36,6 +36,8 @@ export interface M10Deps {
   fullReconcileWeekday?: string;
   /** Safety page cap for the weekly scan. Default 500. */
   fullReconcilePageCap?: number;
+  /** Contact ids stored on an in-progress reconcile cursor. Default 2000. */
+  cursorSeenCap?: number;
   /**
    * When set, the dispatcher asks this function to run each active tenant
    * instead of walking them inside the cron invocation.

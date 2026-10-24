@@ -68,6 +68,7 @@ function harness(options?: {
   reconcilePageCap?: number;
   fullReconcileWeekday?: string;
   fullReconcilePageCap?: number;
+  cursorSeenCap?: number;
   now?: Date;
   timezone?: string;
 }) {
@@ -131,6 +132,7 @@ function harness(options?: {
     ...(options?.reconcilePageCap !== undefined ? { reconcilePageCap: options.reconcilePageCap } : {}),
     ...(options?.fullReconcileWeekday !== undefined ? { fullReconcileWeekday: options.fullReconcileWeekday } : {}),
     ...(options?.fullReconcilePageCap !== undefined ? { fullReconcilePageCap: options.fullReconcilePageCap } : {}),
+    ...(options?.cursorSeenCap !== undefined ? { cursorSeenCap: options.cursorSeenCap } : {}),
   };
   return { deps, tenants, listed, updates, searches: () => searches };
 }
@@ -527,6 +529,35 @@ describe("M06 order reconcile", () => {
     expect(first.searches()).toBe(1);
     expect(JSON.parse((await first.deps.idempotency.get("m06full:loc_1:2026-06-26")) ?? "null")).toMatchObject({
       done: true,
+    });
+  });
+
+  it("bounds the weekly cursor to the most recent contact ids", async () => {
+    const friday = new Date("2026-06-26T12:00:00.000Z");
+    const built = harness({
+      now: friday,
+      budgetMs: 0,
+      cursorSeenCap: 2,
+      pages: () => ({
+        orders: [order({ id: "new", contactId: "newest", createdAt: "2026-06-01T00:00:00.000Z" })],
+        totalCount: 2,
+      }),
+      contactOrders: (contactId) => [
+        order({ id: `qual-${contactId}`, contactId, amount: 15, createdAt: "2025-01-01T00:00:00.000Z" }),
+      ],
+    });
+    await built.tenants.upsert(tenant());
+    await built.deps.idempotency.set(
+      "m06full:loc_1:2026-06-26",
+      JSON.stringify({ offset: 0, seen: ["old-a", "old-b", "old-c"] }),
+      3600,
+    );
+    const result = await runM10Tenant(built.deps, tenant());
+    expect(result.continue).toBe(true);
+    expect(built.listed).toEqual(["newest"]);
+    expect(JSON.parse((await built.deps.idempotency.get("m06full:loc_1:2026-06-26")) ?? "null")).toEqual({
+      offset: 1,
+      seen: ["old-c", "newest"],
     });
   });
 

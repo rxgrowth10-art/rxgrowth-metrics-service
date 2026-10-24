@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { GhlClient } from "../ghl/index.js";
 import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token.js";
 import { json } from "../http/json.js";
@@ -80,10 +81,25 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
   } finally {
     await deps.idempotency.del(lockKey);
     if ((await deps.idempotency.get(rerunKey)) && (await deps.idempotency.setNx(lockKey, CONTACT_LOCK_TTL_SECONDS))) {
+      let retry: { ok: true; written: boolean } | { ok: false; message: string } = {
+        ok: false,
+        message: "unknown",
+      };
       try {
-        await runUntilQuiet(ids, tenant, deps, rerunKey);
+        retry = await runUntilQuiet(ids, tenant, deps, rerunKey);
+      } catch (error) {
+        retry = { ok: false, message: error instanceof Error ? error.message : "unknown" };
       } finally {
         await deps.idempotency.del(lockKey);
+      }
+      if (!retry.ok) {
+        // runUntilQuiet clears the rerun flag before computing. Put it back so a failed trailing pass is not dropped.
+        await deps.idempotency.set(rerunKey, "1", CONTACT_RERUN_TTL_SECONDS);
+        log("error", "webhook.rerun_failed", {
+          locationId: ids.locationId,
+          contactId: contactLogRef(ids.contactId),
+          message: retry.message,
+        });
       }
     }
   }
@@ -131,14 +147,36 @@ function authorized(request: Request, tenant: Tenant | null): tenant is Tenant {
   return Boolean(tenant?.active) && matches;
 }
 
+/** Short hash so a failure log can be correlated without writing the raw contact id. */
+function contactLogRef(contactId: string): string {
+  return createHash("sha256").update(contactId, "utf8").digest("hex").slice(0, 12);
+}
+
+function readString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * A standard GoHighLevel Webhook action posts the contact at the top level
+ * (`contact_id`, `location.id`) plus the action's key-value pairs under
+ * `customData`. The body is not logged; it contains contact PII.
+ */
 function readIds(body: unknown): { locationId: string; contactId: string } | null {
-  if (!body || typeof body !== "object") return null;
-  const record = body as Record<string, unknown>;
-  const locationId = record.locationId;
-  const contactId = record.contactId;
-  if (typeof locationId !== "string" || !locationId.trim()) return null;
-  if (typeof contactId !== "string" || !contactId.trim()) return null;
-  return { locationId: locationId.trim(), contactId: contactId.trim() };
+  const record = asRecord(body);
+  if (!record) return null;
+  const custom = asRecord(record.customData);
+  const location = asRecord(record.location);
+  const locationId = readString(custom?.locationId) ?? readString(record.locationId) ?? readString(location?.id);
+  const contactId = readString(custom?.contactId) ?? readString(record.contactId) ?? readString(record.contact_id);
+  if (!locationId || !contactId) return null;
+  return { locationId, contactId };
 }
 
 function readEventId(body: unknown): string | null {
