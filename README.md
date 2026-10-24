@@ -16,7 +16,8 @@ A workflow nudge recomputes M06 metrics. A daily cron writes M10 win-back eligib
 - `fixtures/test-lab-fields.json` — final custom-field snapshot for location `ekxOqjUKW7M6OV9XAVnx`.
 
 - `api/webhooks/ghl.ts` — M06 nudge. `POST` JSON `{ "locationId", "contactId" }`. Any other property is ignored. Unknown or inactive tenants return 202 without calling GoHighLevel. A second nudge is not dropped; an unchanged metrics hash skips the write.
-- `api/cron/m10.ts` — daily M10 win-back pass. `GET` or `POST` with `Authorization: Bearer $CRON_SECRET`.
+- `api/cron/m10.ts` — daily M10 dispatcher. `GET` or `POST` with `Authorization: Bearer $CRON_SECRET`. Invokes one tenant function per active location.
+- `api/cron/m10-tenant.ts` — one tenant's win-back pass, with the same bearer check.
 
 ## Webhook
 
@@ -36,7 +37,9 @@ M06 never writes `winback_eligibility` or `winback_tier`.
 
 ## Daily win-back cron
 
-Vercel invokes `GET /api/cron/m10` at 03:00 UTC (`0 3 * * *`). The handler rejects the call unless `CRON_SECRET` is set and the bearer token matches. Each active tenant is locked with `m10:{locationId}:{YYYY-MM-DD}` for 36 hours, where the date is that tenant's calendar day, so a second run on the same local day does nothing.
+Vercel invokes `GET /api/cron/m10` at 03:00 UTC (`0 3 * * *`). The handler rejects the call unless `CRON_SECRET` is set and the bearer token matches. It lists active tenants and calls `POST /api/cron/m10-tenant?locationId=` once per tenant, in parallel, with the same bearer token. Each tenant function has its own 300 second limit, so one slow location does not consume the budget of the others.
+
+A tenant hop holds `m10:{locationId}:{YYYY-MM-DD}` for at most 120 seconds and deletes that lock when the hop finishes, including when it throws. Another run the same local day is allowed once the lock is gone; the field writes are unchanged when the values already match. While the lock is held, a second hop skips that tenant. Contact search is paged with `searchAfter`. After 240 seconds the hop stores `m10cursor:{locationId}:{YYYY-MM-DD}` and schedules another call to the tenant route. The next hop starts at that cursor and does not repeat the earlier page. `waitUntil` is used when the platform provides it.
 
 The cron does not re-fetch orders. It reads the M06 fields already on the contact:
 
@@ -195,7 +198,8 @@ The workflow owns `winback_cycle_status` and `winback_cycle_started_at`. This se
 | `evt:{locationId}:{contactId}:{eventId}` | 300s | Only when the payload includes `eventId` or `webhookId`. A derived contact hash is not used. |
 | `lock:{locationId}:{contactId}` | 30s | One in-flight computation per contact |
 | `rerun:{locationId}:{contactId}` | 120s | A nudge arrived during the lock and must be computed again |
-| `m10:{locationId}:{YYYY-MM-DD}` | 36 hours | One daily cron pass per location. The date is the tenant's calendar day. |
+| `m10:{locationId}:{YYYY-MM-DD}` | 120 seconds, released when the hop finishes | One in-flight M10 hop per location. The date is the tenant's calendar day. |
+| `m10cursor:{locationId}:{YYYY-MM-DD}` | 2 hours | `searchAfter` cursor when a tenant hop stops for the time budget. |
 | `m10enroll:{locationId}:{contactId}` | 180 days | Workflow enrollment already succeeded for this eligibility stretch. Deleted when the contact is not eligible. |
 
 `YYYY-MM-DD` is the date in the tenant timezone.

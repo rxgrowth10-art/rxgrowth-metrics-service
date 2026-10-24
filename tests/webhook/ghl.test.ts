@@ -77,6 +77,9 @@ function deps(options?: {
     async searchContacts() {
       return [];
     },
+    async searchContactsPage() {
+      return { contacts: [], searchAfter: null };
+    },
     async addContactToWorkflow() {
       return undefined;
     },

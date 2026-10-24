@@ -27,6 +27,11 @@ export interface GhlContact {
   customFields: GhlContactField[];
 }
 
+export interface GhlContactPage {
+  contacts: GhlContact[];
+  searchAfter: unknown[] | null;
+}
+
 export interface GhlCustomField {
   id: string;
   fieldKey: string;
@@ -47,5 +52,6 @@ export interface GhlClient {
   listCustomFields(): Promise<GhlCustomField[]>;
   updateContact(contactId: string, fields: readonly CustomFieldWrite[]): Promise<void>;
   searchContacts(): Promise<GhlContact[]>;
+  searchContactsPage(searchAfter: readonly unknown[] | null): Promise<GhlContactPage>;
   addContactToWorkflow(contactId: string, workflowId: string, eventStartTime?: string): Promise<void>;
 }

@@ -1,7 +1,7 @@
 import { GhlRequestError } from "./errors.js";
 import { parseContact, parseContactPage, parseCustomFields, parseOrderPage, parseOrderResource } from "./parse.js";
 import { type Clock, LocationRateLimiter, sharedLimiter, systemClock } from "./rate-limit.js";
-import type { CustomFieldWrite, GhlClient, GhlContact, GhlCustomField, GhlOrder } from "./types.js";
+import type { CustomFieldWrite, GhlClient, GhlContact, GhlContactPage, GhlCustomField, GhlOrder } from "./types.js";
 
 export const GHL_API_VERSION = "2021-07-28";
 export const GHL_API_BASE_URL = "https://services.leadconnectorhq.com";
@@ -98,6 +98,34 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
     throw new GhlRequestError("GHL request failed", 0, path);
   }
 
+  async function searchContactsPage(searchAfter: readonly unknown[] | null): Promise<GhlContactPage> {
+    const body: Record<string, unknown> = {
+      locationId,
+      pageLimit: contactPageSize,
+      sort: [{ field: "dateAdded", direction: "asc" }],
+    };
+    if (searchAfter && searchAfter.length > 0) body.searchAfter = [...searchAfter];
+    const response = await requestJson("POST", "/contacts/search", { body });
+    const parsed = parseContactPage(response);
+    return { contacts: parsed.contacts, searchAfter: parsed.searchAfter };
+  }
+
+  async function searchContacts(): Promise<GhlContact[]> {
+    const contacts: GhlContact[] = [];
+    let searchAfter: unknown[] | null = null;
+    for (let page = 0; page < maxContactPages; page += 1) {
+      const parsed = await searchContactsPage(searchAfter);
+      contacts.push(...parsed.contacts);
+      if (parsed.contacts.length < contactPageSize) return contacts;
+      if (!parsed.searchAfter || parsed.searchAfter.length === 0) return contacts;
+      if (searchAfter && JSON.stringify(searchAfter) === JSON.stringify(parsed.searchAfter)) {
+        return contacts;
+      }
+      searchAfter = parsed.searchAfter;
+    }
+    throw new GhlRequestError("Contact pagination exceeded the page cap", 0, "/contacts/search");
+  }
+
   return {
     async listOrders(contactId: string): Promise<GhlOrder[]> {
       const orders: GhlOrder[] = [];
@@ -181,28 +209,8 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
       });
     },
 
-    async searchContacts(): Promise<GhlContact[]> {
-      const contacts: GhlContact[] = [];
-      let searchAfter: unknown[] | null = null;
-      for (let page = 0; page < maxContactPages; page += 1) {
-        const body: Record<string, unknown> = {
-          locationId,
-          pageLimit: contactPageSize,
-          sort: [{ field: "dateAdded", direction: "asc" }],
-        };
-        if (searchAfter && searchAfter.length > 0) body.searchAfter = searchAfter;
-        const response = await requestJson("POST", "/contacts/search", { body });
-        const parsed = parseContactPage(response);
-        contacts.push(...parsed.contacts);
-        if (parsed.contacts.length < contactPageSize) return contacts;
-        if (!parsed.searchAfter || parsed.searchAfter.length === 0) return contacts;
-        if (searchAfter && JSON.stringify(searchAfter) === JSON.stringify(parsed.searchAfter)) {
-          return contacts;
-        }
-        searchAfter = parsed.searchAfter;
-      }
-      throw new GhlRequestError("Contact pagination exceeded the page cap", 0, "/contacts/search");
-    },
+    searchContactsPage,
+    searchContacts,
 
     async addContactToWorkflow(contactId: string, workflowId: string, eventStartTime?: string): Promise<void> {
       await requestJson(

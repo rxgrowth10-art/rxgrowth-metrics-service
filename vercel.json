@@ -10,6 +10,9 @@
     },
     "api/cron/m10.ts": {
       "maxDuration": 300
+    },
+    "api/cron/m10-tenant.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
