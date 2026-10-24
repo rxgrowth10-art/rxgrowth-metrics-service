@@ -179,7 +179,7 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
           locationId,
           altId: locationId,
           altType: "location",
-          limit: pageSize,
+          limit: ORDER_PAGE_SIZE,
           offset,
         },
       });

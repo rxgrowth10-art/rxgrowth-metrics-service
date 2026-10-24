@@ -30,7 +30,7 @@ export interface M10Deps {
   budgetMs?: number;
   /** Order-update window for the M06 reconcile that runs before eligibility. Default 48. */
   reconcileHours?: number;
-  /** Test override for the location-order page cap. Default 30. */
+  /** Location-order pages to scan. Default 30, from M06_RECONCILE_MAX_PAGES. */
   reconcilePageCap?: number;
   /**
    * When set, the dispatcher asks this function to run each active tenant

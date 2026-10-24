@@ -72,7 +72,10 @@ describe("GHL client", () => {
     expect(calls).toBe(2);
     expect(clock.sleeps).toEqual([0]);
     expect(urls[0]).toContain("offset=0");
+    expect(urls[0]).toContain("limit=100");
     expect(urls[0]).not.toContain("limit=500");
+    expect(urls[0]).not.toContain("startAt");
+    expect(urls[0]).not.toContain("endAt");
   });
 
   it("pages orders with offset until totalCount is covered", async () => {
@@ -373,7 +376,9 @@ describe("GHL client", () => {
     expect(url).toContain("altId=loc_1");
     expect(url).toContain("locationId=loc_1");
     expect(url).toContain("offset=40");
-    expect(url).toContain("limit=");
+    expect(url).toContain("limit=100");
     expect(url).not.toContain("contactId");
+    expect(url).not.toContain("startAt");
+    expect(url).not.toContain("endAt");
   });
 });

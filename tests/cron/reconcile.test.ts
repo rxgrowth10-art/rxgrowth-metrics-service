@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runM10Tenant, type M10Deps } from "../../src/cron/m10.js";
-import { orderTouchesWindow, readReconcileHours } from "../../src/cron/reconcile.js";
+import { orderTouchesWindow, readReconcileHours, readReconcileMaxPages } from "../../src/cron/reconcile.js";
 import type { CustomFieldWrite, GhlClient, GhlContact, GhlOrder, GhlOrderPage } from "../../src/ghl/index.js";
 import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
 import { computeM06 } from "../../src/metrics/index.js";
@@ -128,6 +128,17 @@ describe("readReconcileHours", () => {
     expect(readReconcileHours({ M06_RECONCILE_HOURS: "0" })).toBe(48);
     expect(readReconcileHours({ M06_RECONCILE_HOURS: "nope" })).toBe(48);
     expect(readReconcileHours({ M06_RECONCILE_HOURS: "12" })).toBe(12);
+  });
+});
+
+describe("readReconcileMaxPages", () => {
+  it("defaults to 30 when the env value is missing or not a positive integer", () => {
+    expect(readReconcileMaxPages({})).toBe(30);
+    expect(readReconcileMaxPages({ M06_RECONCILE_MAX_PAGES: "" })).toBe(30);
+    expect(readReconcileMaxPages({ M06_RECONCILE_MAX_PAGES: "0" })).toBe(30);
+    expect(readReconcileMaxPages({ M06_RECONCILE_MAX_PAGES: "1.5" })).toBe(30);
+    expect(readReconcileMaxPages({ M06_RECONCILE_MAX_PAGES: "nope" })).toBe(30);
+    expect(readReconcileMaxPages({ M06_RECONCILE_MAX_PAGES: "10" })).toBe(10);
   });
 });
 
@@ -325,11 +336,19 @@ describe("M06 order reconcile", () => {
         pages: () => ({
           orders: [
             order({
-              id: "secret-order",
+              id: "newer",
               contactId: "c1",
               status: "cancelled",
               updatedAt: IN_WINDOW,
+              createdAt: "2026-06-01T00:00:00.000Z",
               sourceName: "pii-secret-name",
+            }),
+            order({
+              id: "older",
+              contactId: "c1",
+              status: "completed",
+              updatedAt: OUTSIDE,
+              createdAt: "2026-03-01T00:00:00.000Z",
             }),
           ],
           totalCount: 1000,
@@ -342,13 +361,15 @@ describe("M06 order reconcile", () => {
       const cap = lines
         .map((line) => {
           try {
-            return JSON.parse(line) as { event?: string };
+            return JSON.parse(line) as { event?: string; data?: Record<string, unknown> };
           } catch {
             return null;
           }
         })
         .find((line) => line?.event === "m06.reconcile_cap");
-      expect(cap).toBeTruthy();
+      expect(cap).toMatchObject({
+        data: { locationId: "loc_1", pages: 1, lastCreatedAt: "2026-03-01T00:00:00.000Z" },
+      });
       expect(result.summary.contacts).toBe(1);
       expect(searches()).toBe(1);
       expect(result.continue).toBe(false);

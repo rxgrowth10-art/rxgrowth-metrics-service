@@ -1,4 +1,4 @@
-import { readReconcileHours } from "../cron/reconcile.js";
+import { readReconcileHours, readReconcileMaxPages } from "../cron/reconcile.js";
 import { createGhlClient, type GhlClient } from "../ghl/index.js";
 import { createIdempotencyStore, type IdempotencyStore } from "../idempotency/index.js";
 import {
@@ -15,6 +15,7 @@ export interface AppDeps {
   cronSecret: string | null;
   enrollEnabled: boolean;
   reconcileHours: number;
+  reconcilePageCap: number;
   ghlFactory: (args: { apiKey: string; locationId: string }) => GhlClient;
   now: () => Date;
 }
@@ -31,6 +32,7 @@ export function createDefaultDeps(env: NodeJS.ProcessEnv = process.env): AppDeps
     cronSecret: emptyToNull(env.CRON_SECRET),
     enrollEnabled: env.M10_ENROLL_ENABLED === "true",
     reconcileHours: readReconcileHours(env),
+    reconcilePageCap: readReconcileMaxPages(env),
     ghlFactory: ({ apiKey, locationId }) =>
       createGhlClient({
         apiKey,

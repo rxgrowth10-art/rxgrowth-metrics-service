@@ -25,6 +25,14 @@ export function readReconcileHours(env: NodeJS.ProcessEnv): number {
   return value;
 }
 
+export function readReconcileMaxPages(env: NodeJS.ProcessEnv): number {
+  const raw = env.M06_RECONCILE_MAX_PAGES?.trim();
+  if (!raw) return MAX_RECONCILE_PAGES;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) return MAX_RECONCILE_PAGES;
+  return value;
+}
+
 export function orderTouchesWindow(order: { updatedAt?: string | null; createdAt?: string | null }, now: Date, hours: number): boolean {
   const instant = parseInstant(order.updatedAt) ?? parseInstant(order.createdAt);
   if (!instant) return false;
@@ -37,9 +45,10 @@ export function orderTouchesWindow(order: { updatedAt?: string | null; createdAt
  * recompute M06 before win-back eligibility. Returns true when this hop should
  * stop and continue later.
  *
- * `GET /payments/orders` has no sort parameter. `startAt` is not documented as
- * an updatedAt filter, so a cancel on an older order would be missed. The scan
- * walks offset order and stops after the page cap.
+ * The list is newest-first by createdAt, not updatedAt. startAt/endAt select
+ * whole createdAt days in the location timezone, so they miss a recent update
+ * on an older order. The scan keeps offset order, limit 100, and the updatedAt
+ * filter, and stops after the page cap.
  */
 export async function reconcileRecentOrders(args: {
   client: GhlClient;
@@ -106,11 +115,13 @@ export async function reconcileRecentOrders(args: {
       return false;
     }
     if (pages >= cap) {
+      const last = page.orders[page.orders.length - 1];
       log("warn", "m06.reconcile_cap", {
         locationId: args.tenant.locationId,
         pages,
         cap,
         offset: nextOffset,
+        lastCreatedAt: last?.createdAt ?? null,
       });
       await args.idempotency.set(key, JSON.stringify({ done: true }), RECONCILE_DONE_TTL_SECONDS);
       return false;
