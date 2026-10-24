@@ -11,8 +11,6 @@ export interface AppDeps {
   tenants: TenantStore;
   idempotency: IdempotencyStore;
   encryptionKey: Buffer;
-  /** True when VERCEL_ENV=production. Webhook query tokens are mandatory there. */
-  production: boolean;
   cronSecret: string | null;
   enrollEnabled: boolean;
   ghlFactory: (args: { apiKey: string; locationId: string }) => GhlClient;
@@ -28,7 +26,6 @@ export function createDefaultDeps(env: NodeJS.ProcessEnv = process.env): AppDeps
     tenants: createTenantStore(env, encryptionKey),
     idempotency: createIdempotencyStore(env),
     encryptionKey,
-    production: env.VERCEL_ENV === "production",
     cronSecret: emptyToNull(env.CRON_SECRET),
     enrollEnabled: env.M10_ENROLL_ENABLED === "true",
     ghlFactory: ({ apiKey, locationId }) =>

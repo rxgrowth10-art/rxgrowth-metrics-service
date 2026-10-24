@@ -11,6 +11,8 @@ import { order } from "../helpers/orders";
 
 const KEY = parseEncryptionKey(Buffer.alloc(32, 4).toString("base64"));
 const NOW = new Date("2026-01-21T12:00:00.000Z");
+const WEBHOOK_TOKEN = "tenant-webhook-token";
+const WEBHOOK_HASH = hashWebhookToken(WEBHOOK_TOKEN);
 
 function tenant(overrides: Partial<Tenant> = {}): Tenant {
   return {
@@ -20,7 +22,7 @@ function tenant(overrides: Partial<Tenant> = {}): Tenant {
     timezone: "UTC",
     currency: "EGP",
     m10WorkflowId: null,
-    webhookTokenHash: null,
+    webhookTokenHash: WEBHOOK_HASH,
     active: true,
     ...overrides,
   };
@@ -81,7 +83,6 @@ function deps(options?: {
     tenants,
     idempotency: new MemoryIdempotencyStore(() => NOW.getTime()),
     encryptionKey: KEY,
-    production: false,
     ghlFactory: ({ apiKey, locationId }) => {
       seenKeys.push(`${locationId}:${apiKey}`);
       return ghl;
@@ -99,7 +100,7 @@ function deps(options?: {
 }
 
 function post(body: unknown, headers: Record<string, string> = {}): Request {
-  return postUrl(body, "https://example.test/api/webhooks/ghl", headers);
+  return postUrl(body, `https://example.test/api/webhooks/ghl?t=${WEBHOOK_TOKEN}`, headers);
 }
 
 function postUrl(body: unknown, url: string, headers: Record<string, string> = {}): Request {
@@ -155,30 +156,24 @@ describe("GHL webhook", () => {
     expect(harness.seenKeys).toEqual([]);
   });
 
-  it("requires the tenant query token in production and whenever a hash is stored", async () => {
-    const token = "tenant-webhook-token";
-    const hash = hashWebhookToken(token);
+  it("rejects a missing webhook hash in every environment, including preview", async () => {
     const open = deps();
-    await open.tenants.upsert(tenant());
-    expect((await handleGhlWebhook(post({ locationId: "loc_1", contactId: "c" }), open.deps)).status).toBe(202);
-
-    open.deps.production = true;
-    const productionOpen = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "c" }), open.deps);
-    expect(productionOpen.status).toBe(401);
-    expect(JSON.stringify(await productionOpen.json())).not.toContain(token);
+    await open.tenants.upsert(tenant({ webhookTokenHash: null }));
+    const missing = await handleGhlWebhook(
+      postUrl({ locationId: "loc_1", contactId: "c" }, "https://example.test/api/webhooks/ghl"),
+      open.deps,
+    );
+    expect(missing.status).toBe(401);
+    expect(JSON.stringify(await missing.json())).not.toContain(WEBHOOK_TOKEN);
 
     const closed = deps();
-    closed.deps.production = false;
-    await closed.tenants.upsert(tenant({ webhookTokenHash: hash }));
+    await closed.tenants.upsert(tenant());
     const rejected = await handleGhlWebhook(
       postUrl({ locationId: "loc_1", contactId: "c" }, "https://example.test/api/webhooks/ghl?t=wrong"),
       closed.deps,
     );
     expect(rejected.status).toBe(401);
-    const accepted = await handleGhlWebhook(
-      postUrl({ locationId: "loc_1", contactId: "c" }, `https://example.test/api/webhooks/ghl?t=${token}`),
-      closed.deps,
-    );
+    const accepted = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "c" }), closed.deps);
     expect(accepted.status).toBe(202);
   });
 

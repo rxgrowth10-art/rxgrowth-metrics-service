@@ -26,7 +26,7 @@ curl -X POST 'https://<deployment>/api/webhooks/ghl?t=TENANT_WEBHOOK_TOKEN' \
   -d '{"locationId":"LOCATION_ID","contactId":"CONTACT_ID"}'
 ```
 
-The handler returns 202 after it re-fetches orders and either writes metrics or skips an unchanged hash. It returns 400 when `locationId` or `contactId` is missing, 401 when the tenant's `?t=` token does not match `webhook_token_hash`, and 500 when processing fails so the sender can retry. In production the hash is required. Outside production a tenant with no hash is accepted so tests can run. The payload is only a signal. There is no shared webhook secret: a standard GoHighLevel Webhook action cannot set headers, so each location's workflow URL carries that tenant's token. Query strings are stripped from logs.
+The handler returns 202 after it re-fetches orders and either writes metrics or skips an unchanged hash. It returns 400 when `locationId` or `contactId` is missing, 401 when the tenant's `?t=` token does not match `webhook_token_hash`, and 500 when processing fails so the sender can retry. A tenant with no hash is rejected in every environment, including Preview. The payload is only a signal. There is no shared webhook secret: a standard GoHighLevel Webhook action cannot set headers, so each location's workflow URL carries that tenant's token. Query strings are stripped from logs.
 
 A nudge with no `eventId` is always computed, guarded by a 30 second per-contact lock. If a second nudge arrives while that lock is held, it is queued and the in-flight run computes once more after it finishes, so a new order a few seconds later is not dropped. An explicit `eventId` or `webhookId` is still deduped for 300 seconds.
 
@@ -53,7 +53,7 @@ Copy `.env.example` to `.env.local`. Values are names only; do not commit secret
 | `TENANT_CURRENCY` | no | Defaults to `USD`. Stored only; amounts are not rescaled. |
 | `TENANT_M10_WORKFLOW_ID` | no | Workflow id used when M10 enrollment is enabled. |
 | `TENANT_ACTIVE` | no | `false` or `0` disables the tenant. Defaults to active. |
-| `TENANT_WEBHOOK_TOKEN_HASH` | production webhook | SHA-256 hex of this tenant's webhook query token. Also accepted as `webhookTokenHash` inside `TENANT_CONFIG`. |
+| `TENANT_WEBHOOK_TOKEN_HASH` | webhook | SHA-256 hex of this tenant's webhook query token. Required in every environment, including Preview. Also accepted as `webhookTokenHash` inside `TENANT_CONFIG`. |
 | `KV_REST_API_URL` | required when `VERCEL_ENV=production` | Upstash Redis REST URL (Vercel KV name). Production fails closed when this pair is missing. |
 | `KV_REST_API_TOKEN` | required when `VERCEL_ENV=production` | Upstash Redis REST token (Vercel KV name). |
 | `UPSTASH_REDIS_REST_URL` | fallback | Used only together with `UPSTASH_REDIS_REST_TOKEN`, and only when the `KV_REST_API_*` pair is unset. |
@@ -139,7 +139,7 @@ Put the hash on the tenant. Put the token only in the workflow URL:
 https://<deployment>/api/webhooks/ghl?t=<token>
 ```
 
-Rotate by generating a new pair and replacing that tenant's hash. The previous token stops matching as soon as the hash is saved. In production (`VERCEL_ENV=production`) a tenant with no hash is rejected. Outside production, a missing hash leaves the check off so local tests can run. When a hash is set, it is required in every environment.
+Rotate by generating a new pair and replacing that tenant's hash. The previous token stops matching as soon as the hash is saved. A tenant with no hash is rejected in every environment, including Preview and local runs.
 
 Regenerate the field catalog after a fixture change:
 
@@ -147,7 +147,7 @@ Regenerate the field catalog after a fixture change:
 npm run generate:fields
 ```
 
-Runtime writes resolve custom-field ids with `GET /locations/{locationId}/customFields?model=contact` and match `fieldKey`. The ids in `src/schema/fields.ts` are the test-lab reference, not ids to send for other locations.
+Runtime writes resolve custom-field ids with `GET /locations/{locationId}/customFields?model=contact` and match `fieldKey`. The key-to-id map is cached per location in Redis for 10 minutes. A missing key or an HTTP 400/422 from the contact update drops that cache and loads the list once more. The ids in `src/schema/fields.ts` are the test-lab reference, not ids to send for other locations.
 
 ## Field contract
 

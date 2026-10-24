@@ -15,7 +15,6 @@ export interface WebhookDeps {
   tenants: TenantStore;
   idempotency: IdempotencyStore;
   encryptionKey: Buffer;
-  production: boolean;
   ghlFactory: (args: { apiKey: string; locationId: string }) => GhlClient;
   now: () => Date;
 }
@@ -38,7 +37,7 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
     log("info", "webhook.skipped", { locationId: ids.locationId, contactId: ids.contactId, reason });
     return json({ accepted: false, reason }, 202);
   }
-  if (!authorized(request, tenant, deps.production)) {
+  if (!authorized(request, tenant)) {
     log("warn", "webhook.unauthorized", { locationId: ids.locationId, contactId: ids.contactId });
     return json({ error: "unauthorized" }, 401);
   }
@@ -122,13 +121,13 @@ async function compute(
     orders,
     timeZone: tenant.timezone,
     now: deps.now(),
+    fieldCache: { store: deps.idempotency, locationId: tenant.locationId },
   });
 }
 
-function authorized(request: Request, tenant: Tenant, production: boolean): boolean {
-  const presented = readWebhookToken(request);
-  if (!tenant.webhookTokenHash) return !production;
-  return webhookTokenMatches(presented, tenant.webhookTokenHash);
+function authorized(request: Request, tenant: Tenant): boolean {
+  if (!tenant.webhookTokenHash) return false;
+  return webhookTokenMatches(readWebhookToken(request), tenant.webhookTokenHash);
 }
 
 function readIds(body: unknown): { locationId: string; contactId: string } | null {
