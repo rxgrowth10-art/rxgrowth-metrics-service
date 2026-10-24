@@ -27,7 +27,7 @@ curl -X POST 'https://<deployment>/api/webhooks/ghl?t=TENANT_WEBHOOK_TOKEN' \
   -d '{"locationId":"LOCATION_ID","contactId":"CONTACT_ID"}'
 ```
 
-The handler returns 202 after it re-fetches orders and either writes metrics or skips an unchanged hash. It returns 400 when `locationId` or `contactId` is missing, and 500 when processing fails so the sender can retry. An unknown location, an inactive tenant, a missing hash, and a `?t=` token that does not match `webhook_token_hash` all return 401 with the same body. The token is compared with a constant-time hash check, including a stand-in hash when the location is unknown, so the response does not reveal whether that tenant exists. A tenant with no hash is rejected in every environment, including Preview. The payload is only a signal. A standard GoHighLevel Webhook action posts the contact's fields at the top level (`contact_id`, `location.id`, name, email, phone) and the action's Custom Data under `customData`. The RX Test Lab workflow sets `customData.locationId` to `{{location.id}}` and `customData.contactId` to `{{contact.id}}`. Those custom values are used first. The handler does not log the body. There is no shared webhook secret: that action cannot set headers, so each location's workflow URL carries that tenant's token. Query strings are stripped from logs. A trailing recompute that fails after the contact lock is released is logged as `webhook.rerun_failed` with the location id and a short hash of the contact id, and the rerun flag is put back.
+The handler returns 202 after it re-fetches orders and either writes metrics or skips an unchanged hash. It returns 400 when `locationId` or `contactId` is missing, and 400 when either id is not 1–64 alphanumeric characters. It returns 500 when processing fails so the sender can retry. An unknown location, an inactive tenant, a missing hash, and a `?t=` token that does not match `webhook_token_hash` all return 401 with the same body. The token is compared with a constant-time hash check, including a stand-in hash when the location is unknown, so the response does not reveal whether that tenant exists. A tenant with no hash is rejected in every environment, including Preview. The payload is only a signal. A standard GoHighLevel Webhook action posts the contact's fields at the top level (`contact_id`, `location.id`, name, email, phone) and the action's Custom Data under `customData`. The RX Test Lab workflow sets `customData.locationId` to `{{location.id}}` and `customData.contactId` to `{{contact.id}}`. Those custom values are used first. The handler does not log the body. There is no shared webhook secret: that action cannot set headers, so each location's workflow URL carries that tenant's token. Query strings are stripped from logs. A trailing recompute that fails is logged as `webhook.rerun_failed`. The rerun flag is put back before the contact lock is released, so a request waiting on that lock does not start a second recompute.
 
 A nudge with no `eventId` is always computed, guarded by a 30 second per-contact lock. If a second nudge arrives while that lock is held, it is queued and the in-flight run computes once more after it finishes, so a new order a few seconds later is not dropped. An explicit `eventId` or `webhookId` is still deduped for 300 seconds.
 
@@ -100,7 +100,7 @@ Copy `.env.example` to `.env.local`. Values are names only; do not commit secret
 
 The Vercel Marketplace also injects `POSTGRES_URL`, `KV_URL`, `REDIS_URL`, and `KV_REST_API_READ_ONLY_TOKEN`. This service does not read those.
 
-Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, `secret`, bearer strings, and every query string. Do not log tenant API keys or webhook tokens.
+Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, `secret`, bearer strings, and every query string. Every `contactId` field is replaced with the same 12-character SHA-256 prefix, so the raw contact id is never written. Do not log tenant API keys, webhook tokens, or the webhook body.
 
 ## Add a tenant
 
@@ -243,6 +243,10 @@ The attached M06 resolver is the starting point. These locked rules replace it:
 - The mapping note cited overdue-ratio id `utMAZhK2y8laZAfqAJXb`. The test-lab snapshot id is `PysK1ynJ47hCLa8y2G6u`. Runtime mapping uses the key, and the snapshot is the id fixture.
 
 Preserved from the resolver: average interval is the mean, typical interval is the median, customer type/status bands, 30-day trend comparison, and trailing-12-month frequency labels (those labels are computed and not written; no contact field is assigned to them).
+
+## Dependencies
+
+The application does not import zod. `@vercel/functions` depends on `@vercel/oidc`, which depends on `@vercel/cli-config`, which depends on zod. That transitive copy resolved to `4.1.11`, which is below the patched `4.6.7` release. `package.json` overrides zod to `4.6.7` so `npm audit` stays clean.
 
 ## Checks
 

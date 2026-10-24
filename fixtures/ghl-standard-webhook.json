@@ -1,11 +1,11 @@
 {
-  "contact_id": "c_standard_1",
+  "contact_id": "cstandard1",
   "first_name": "Pat",
   "last_name": "Example",
   "full_name": "Pat Example",
   "email": "pii-webhook-secret@example.test",
   "phone": "+15555550123",
-  "tags": ["order-submitted"],
+  "tags": "order-submitted,priority-high",
   "address1": "1 Example Street",
   "city": "Cairo",
   "state": "",
@@ -18,6 +18,7 @@
   "contact_source": "workflow",
   "full_address": "1 Example Street, Cairo",
   "contact_type": "customer",
+  "favorite_dish": "pii-custom-field-secret",
   "location": {
     "name": "RX Test Lab",
     "address": "1 Example Street",
@@ -26,14 +27,42 @@
     "country": "EG",
     "postalCode": "11511",
     "fullAddress": "1 Example Street, Cairo",
-    "id": "loc_1"
+    "id": "loc1"
+  },
+  "contact": {
+    "attributionSource": {
+      "sessionSource": "Direct traffic",
+      "url": "https://example.test/menu",
+      "campaign": null,
+      "utmSource": null,
+      "utmMedium": null,
+      "utmContent": null,
+      "referrer": null,
+      "campaignId": null,
+      "fbclid": null,
+      "gclid": null,
+      "msclkid": null,
+      "dclid": null,
+      "fbc": null,
+      "fbp": null,
+      "fbEventId": null,
+      "userAgent": null,
+      "ip": null,
+      "medium": "webhook",
+      "mediumId": null
+    }
   },
   "workflow": {
-    "id": "wf_m06",
-    "name": "M06 Order Submitted"
+    "id": "wfM06",
+    "name": "M06 Order Submitted",
+    "status": "published"
+  },
+  "triggerData": {
+    "eventType": "Order Submitted",
+    "orderId": "orderStandard1"
   },
   "customData": {
-    "locationId": "loc_1",
-    "contactId": "c_standard_1"
+    "locationId": "loc1",
+    "contactId": "cstandard1"
   }
 }

@@ -1,6 +1,13 @@
+import { createHash } from "node:crypto";
+
 export type LogLevel = "info" | "warn" | "error";
 
 const SENSITIVE_KEY = /api[_-]?key|authorization|token|secret|password|credential|cipher|^t$/i;
+
+/** Same 12-hex prefix on every log line. The raw contact id is never written. */
+export function contactLogRef(contactId: string): string {
+  return createHash("sha256").update(contactId, "utf8").digest("hex").slice(0, 12);
+}
 
 export function redact(value: unknown, depth = 0): unknown {
   if (depth > 8) return "[max-depth]";
@@ -8,7 +15,11 @@ export function redact(value: unknown, depth = 0): unknown {
   if (value && typeof value === "object") {
     const output: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(value)) {
-      output[key] = SENSITIVE_KEY.test(key) ? "[redacted]" : redact(inner, depth + 1);
+      if (key === "contactId" && typeof inner === "string") {
+        output[key] = contactLogRef(inner);
+      } else {
+        output[key] = SENSITIVE_KEY.test(key) ? "[redacted]" : redact(inner, depth + 1);
+      }
     }
     return output;
   }
