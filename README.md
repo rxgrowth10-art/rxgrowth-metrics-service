@@ -51,7 +51,7 @@ A contact is eligible when the qualifying count is at least 3, days since the la
 
 The only fields written are `winback_eligibility` and `winback_tier`, and only when those values change. `winback_cycle_status` and `winback_cycle_started_at` are never written.
 
-`M10_ENROLL_ENABLED=true` adds an eligible contact to the tenant's `m10_workflow_id`. The flag defaults off. Enrollment is recorded on its own key, `m10enroll:{locationId}:{contactId}`, for 180 days. The eligibility fields are still written when the workflow call fails. A later cron day retries that call until it succeeds, including when the contact is already `Eligible`. The marker is removed when the contact is not eligible, so a later cycle can enroll again. A recorded success is not repeated while the marker is present.
+`M10_ENROLL_ENABLED=true` adds an eligible contact to the tenant's `m10_workflow_id`. The flag defaults off. Enrollment is recorded on its own key, `m10enroll:{locationId}:{contactId}`, for 180 days. The eligibility fields are still written when the workflow call fails. A later run retries that call until it succeeds, including when the contact is already `Eligible` and including a later pass on the same local day. The marker is removed when the contact is not eligible, so a later cycle can enroll again. A recorded success is not repeated while the marker is present.
 
 ## Divergences from the M10 calculator
 
