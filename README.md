@@ -1,1 +1,119 @@
 # rxgrowth-metrics-service
+
+Multi-tenant customer metrics for restaurant locations on GoHighLevel. A workflow Webhook action sends `locationId` and `contactId`. This service loads that tenant's API key, re-fetches the contact's orders, computes metrics, and writes them back to contact custom fields.
+
+This revision is the foundation: field contract, tenant store, GoHighLevel client, idempotency, and health check. The M06 webhook and the M10 daily cron are the next changes on top of these modules. Nothing here calls GoHighLevel or provisions a Vercel project.
+
+## Layout
+
+- `api/health.ts` — liveness check.
+- `src/schema/fields.ts` — generated catalog of the RX Test Lab custom fields, keyed for runtime lookup. Test-lab ids are fixtures only.
+- `src/tenants/` — `TenantStore` with a Neon implementation and an in-memory implementation. API keys are AES-256-GCM ciphertext.
+- `src/ghl/` — HTTP client. Timeout, retry with backoff on 429 and 5xx, per-location spacing, order pages via `offset`, contact search via `searchAfter`.
+- `src/idempotency/` — `SET NX` with TTL. Upstash Redis when configured, memory otherwise.
+- `src/time/business-date.ts` — tenant-timezone calendar dates.
+- `migrations/001_tenants.sql` — Neon schema.
+- `fixtures/test-lab-fields.json` — final custom-field snapshot for location `ekxOqjUKW7M6OV9XAVnx`.
+
+Planned handlers, built on this foundation:
+
+- `api/webhooks/ghl.ts` — M06. Accepts only `locationId` and `contactId`, returns 202, ignores every other payload value.
+- `api/cron/m10.ts` — daily win-back pass, authorized with `Authorization: Bearer $CRON_SECRET`.
+
+## Environment
+
+Copy `.env.example` to `.env.local`. Values are names only; do not commit secrets.
+
+| Name | Required | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | yes, in production | Neon Postgres connection string |
+| `TENANT_ENCRYPTION_KEY` | yes | 32-byte key, base64 or 64-char hex, for tenant API keys |
+| `UPSTASH_REDIS_REST_URL` | production | Upstash Redis REST URL |
+| `UPSTASH_REDIS_REST_TOKEN` | production | Upstash Redis REST token |
+| `CRON_SECRET` | yes, for the cron | Bearer token Vercel Cron sends |
+| `WEBHOOK_SHARED_SECRET` | no | When set, `POST /api/webhooks/ghl` requires header `x-webhook-secret`. Leave unset while GoHighLevel cannot sign the webhook. |
+| `GHL_API_BASE_URL` | no | Defaults to `https://services.leadconnectorhq.com`. Version header is `2021-07-28`. |
+| `M10_ENROLL_ENABLED` | no | `true` enrolls newly eligible contacts into `m10_workflow_id`. Default off. |
+
+Logs are JSON on stdout. The logger redacts `apiKey`, `authorization`, `token`, `secret`, and bearer strings. Do not log tenant API keys.
+
+## Add a tenant
+
+1. Apply `migrations/001_tenants.sql` to the Neon database.
+2. Encrypt the location's GoHighLevel private-integration token. The token is read from stdin and is not passed as an argument:
+
+```bash
+export TENANT_ENCRYPTION_KEY="base64-32-byte-key"
+printf '%s' "$GHL_TOKEN" | node scripts/encrypt-api-key.mjs
+```
+
+3. Insert the ciphertext. `timezone` is an IANA name used for calendar-day math. `currency` is stored for the tenant and is not used to rescale order amounts. `m10_workflow_id` is optional until enrollment is turned on.
+
+```sql
+INSERT INTO tenants (
+  location_id, name, api_key_encrypted, timezone, currency, m10_workflow_id, active
+) VALUES (
+  'LOCATION_ID',
+  'Restaurant name',
+  'v1:...',
+  'Africa/Cairo',
+  'EGP',
+  NULL,
+  TRUE
+);
+```
+
+Unknown or inactive locations do no work. Keys are decrypted only in memory for the GoHighLevel call.
+
+Regenerate the field catalog after a fixture change:
+
+```bash
+npm run generate:fields
+```
+
+Runtime writes resolve custom-field ids with `GET /locations/{locationId}/customFields?model=contact` and match `fieldKey`. The ids in `src/schema/fields.ts` are the test-lab reference, not ids to send for other locations.
+
+## Field contract
+
+`contact.customerdaysoverdue` and `contact.winback_status` are not in the catalog. Do not reference them.
+
+M06 writes these keys (and does not write win-back eligibility):
+
+`total_orders`, `qualifying_order_count`, `first_order_date`, `last_order_date`, `lifetime_value`, `average_order_value`, `highest_order_value`, `lowest_order_value`, `customer_type`, `customer_status`, `lifecycle_stage`, `last_order_location`, `last_order_type`, `average_order_interval_days`, `typical_order_interval_days`, `orders_last_30_days`, `orders_previous_30_days`, `spend_last_30_days`, `spend_previous_30_days`, `order_frequency_trend`, `spending_trend`, `days_since_last_order`, `expected_next_order_date`, `days_overdue`, `overdue_ratio`, `metrics_hash`, `m06_intelligence_updated_at`.
+
+`metrics_hash` is a sha256 of the written values. `m06_intelligence_updated_at` is excluded from that hash so an unchanged metric set can skip the contact update entirely.
+
+M10 writes only `winback_eligibility` and `winback_tier`.
+
+The workflow owns `winback_cycle_status` and `winback_cycle_started_at`. This service reads `winback_cycle_status` and never writes either field.
+
+## Idempotency keys
+
+| Key | TTL | Meaning |
+| --- | --- | --- |
+| `evt:{locationId}:{contactId}:{eventId-or-derived}` | 300s | One webhook computation per event |
+| `lock:{locationId}:{contactId}` | 30s | One in-flight computation per contact |
+| `m10:{locationId}:{YYYY-MM-DD}` | through the tenant's calendar day | One daily cron pass per location |
+
+`YYYY-MM-DD` is the date in the tenant timezone.
+
+## GoHighLevel client
+
+Orders: `GET /payments/orders` with `locationId`, `altId`, `altType=location`, `contactId`, `limit`, and `offset`. Pages continue until `totalCount` is covered. The client does not issue one `limit=500` request. A page cap throws instead of writing metrics from a partial history.
+
+Contacts for the cron: `POST /contacts/search` with `pageLimit` and `searchAfter`.
+
+Custom fields: `PUT /contacts/{contactId}` sends `{ id, key, field_value }` for the fields being changed.
+
+Per-location spacing defaults to 100ms between requests on a warm instance. It is process-local. Retries cover HTTP 429, HTTP 5xx, and network failures, and they honor `Retry-After` up to a cap.
+
+## Checks
+
+```bash
+npm install
+npm test
+npm run typecheck
+npm run lint
+```
+
+Node.js 22 or newer. Tests use mocked `fetch`, in-memory stores, and the test-lab fixture. They do not call GoHighLevel, Neon, or Upstash.
