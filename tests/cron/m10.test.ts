@@ -309,7 +309,9 @@ describe("GET /api/cron/m10", () => {
 
   it("does not run without configuration", async () => {
     vi.stubEnv("DATABASE_URL", "");
-    vi.stubEnv("TENANT_ENCRYPTION_KEY", "");
+    vi.stubEnv("TENANT_KEY_ENCRYPTION_KEY", "");
+    vi.stubEnv("KV_REST_API_URL", "");
+    vi.stubEnv("KV_REST_API_TOKEN", "");
     const response = await GET(cronRequest("Bearer cron-secret"));
     expect(response.status).toBe(500);
   });
