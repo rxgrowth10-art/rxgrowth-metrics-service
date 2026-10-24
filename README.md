@@ -2,7 +2,7 @@
 
 Multi-tenant customer metrics for restaurant locations on GoHighLevel. A workflow Webhook action sends `locationId` and `contactId`. This service loads that tenant's API key, re-fetches the contact's orders, computes metrics, and writes them back to contact custom fields.
 
-This revision adds the M06 webhook on top of the foundation. The M10 daily cron is the next change. Nothing here calls GoHighLevel or provisions a Vercel project.
+A workflow nudge recomputes M06 metrics. A daily cron writes M10 win-back eligibility from those stored fields. Nothing in this repository calls GoHighLevel or provisions a Vercel project.
 
 ## Layout
 
@@ -16,7 +16,7 @@ This revision adds the M06 webhook on top of the foundation. The M10 daily cron 
 - `fixtures/test-lab-fields.json` — final custom-field snapshot for location `ekxOqjUKW7M6OV9XAVnx`.
 
 - `api/webhooks/ghl.ts` — M06 nudge. `POST` JSON `{ "locationId", "contactId" }`. Any other property is ignored. Unknown or inactive tenants return 202 without calling GoHighLevel. A second nudge is not dropped; an unchanged metrics hash skips the write.
-- `api/cron/m10.ts` — daily win-back pass, still to be added. It will require `Authorization: Bearer $CRON_SECRET`.
+- `api/cron/m10.ts` — daily M10 win-back pass. `GET` or `POST` with `Authorization: Bearer $CRON_SECRET`.
 
 ## Webhook
 
@@ -33,6 +33,29 @@ A nudge with no `eventId` is always computed, guarded by a 30 second per-contact
 List items that already include `paymentStatus` and `liveMode` are used as-is. `markAsTest` is often absent and then means not a test order. If `paymentStatus` or `liveMode` is missing, the service fetches `GET /payments/orders/{orderId}` with `altId` and `altType=location` before applying the qualifying rule. Orders whose `contactId` is some other contact are dropped. `altId` and `altType=location` are sent on every order request.
 
 M06 never writes `winback_eligibility` or `winback_tier`.
+
+## Daily win-back cron
+
+Vercel invokes `GET /api/cron/m10` at 03:00 UTC (`0 3 * * *`). The handler rejects the call unless `CRON_SECRET` is set and the bearer token matches. Each active tenant is locked with `m10:{locationId}:{YYYY-MM-DD}` for 36 hours, where the date is that tenant's calendar day, so a second run on the same local day does nothing.
+
+The cron does not re-fetch orders. It reads the M06 fields already on the contact:
+
+- qualifying count from `qualifying_order_count`, falling back to `total_orders`
+- days since the last order, recomputed from `last_order_date` and today's date in the tenant timezone
+- `typical_order_interval_days`
+
+A contact is eligible when the qualifying count is at least 3, days since the last order are at least 21, the typical interval is greater than 0, and `days_since_last / typical` rounds to at least 1.5. Tier is `High` at 2.0 or more and `Medium` otherwise. Anyone else who already has order history is `Not Eligible` / `None`. Contacts with no qualifying count and no last order date are left alone. Contacts whose `winback_cycle_status` is `In Progress` are skipped.
+
+The only fields written are `winback_eligibility` and `winback_tier`, and only when those values change. `winback_cycle_status` and `winback_cycle_started_at` are never written.
+
+`M10_ENROLL_ENABLED=true` adds a contact to the tenant's `m10_workflow_id` when eligibility transitions to `Eligible`. The flag defaults off. An enrollment failure is logged and does not roll back the field write; a later run will not retry enrollment once the contact is already `Eligible`.
+
+## Divergences from the M10 calculator
+
+- The calculator read `total_orders`. The cron prefers `qualifying_order_count` and uses `total_orders` only when that field is empty. After M06 those two counts are the same full qualifying count.
+- The calculator parsed `last_order_date` with `new Date(...)` and then converted to `Africa/Cairo`. A stored `YYYY-MM-DD` is treated as that calendar date in the tenant timezone. `new Date("2026-01-01")` is UTC midnight, which is still 1 January in Cairo and 31 December in New York.
+- The calculator can emit `daysOverdue`. The cron does not write it. M06 already writes `days_overdue`, rounded to two decimals.
+- Tier stays `None` unless the contact is eligible. That matches the calculator and not the M06 resolver, which assigned a tier from the ratio alone.
 
 ## Environment
 
@@ -172,7 +195,7 @@ The workflow owns `winback_cycle_status` and `winback_cycle_started_at`. This se
 | `evt:{locationId}:{contactId}:{eventId}` | 300s | Only when the payload includes `eventId` or `webhookId`. A derived contact hash is not used. |
 | `lock:{locationId}:{contactId}` | 30s | One in-flight computation per contact |
 | `rerun:{locationId}:{contactId}` | 120s | A nudge arrived during the lock and must be computed again |
-| `m10:{locationId}:{YYYY-MM-DD}` | through the tenant's calendar day | One daily cron pass per location |
+| `m10:{locationId}:{YYYY-MM-DD}` | 36 hours | One daily cron pass per location. The date is the tenant's calendar day. |
 
 `YYYY-MM-DD` is the date in the tenant timezone.
 
@@ -192,7 +215,7 @@ The attached M06 resolver is the starting point. These locked rules replace it:
 
 - Qualifying orders are `liveMode && !markAsTest && amount > 0`, with order status other than `cancelled`, `refunded`, or `partially_refunded`, and `paymentStatus` in `paid`, `unpaid`, or `partially_paid`. The resolver instead required `status === "completed"` and ignored payment status, so a completed refunded order qualified and an unpaid COD order only qualified when its status was exactly `completed`. Fulfillment status still does not disqualify an order. The resolver also required `contactId`; this service does not, because orders are already fetched for one contact.
 - `total_orders`, `qualifying_order_count`, and lifetime value count every qualifying order. Interval math collapses orders that share a calendar day in the tenant timezone, so there are no 0-day gaps. The resolver pushed a 0-day interval for same-day orders. Two orders on day 1 and one on day 11 are 3 orders and intervals `[10]`. Three orders on one day produce `intervals = []`, `typical_order_interval_days` empty, and `overdue_ratio` empty.
-- The resolver computed win-back eligibility inside M06 (`>= 2` orders, no 21-day minimum) and a tier even when the contact was not eligible. M06 here does not write eligibility or tier. The daily cron will use the M10 calculator rule.
+- The resolver computed win-back eligibility inside M06 (`>= 2` orders, no 21-day minimum) and a tier even when the contact was not eligible. M06 here does not write eligibility or tier. The daily cron uses the M10 calculator rule: at least 3 qualifying orders, at least 21 days since the last order, typical interval greater than 0, and overdue ratio at least 1.5.
 - The resolver left `daysOverdue` unrounded. Values here are rounded to two decimals, including inside M06.
 - The resolver set `lastOrderType` to null on purpose. It is the checkout `delivery.method` on the latest qualifying order's detail: `shipping` writes Delivery and `pickup` writes Pickup. Any other value, including a missing `delivery` object, `sourceSubType`, a shipping fee, or a payment method name, is left off the contact update. A detail `markAsTest: true` excludes that order and the next latest is tried, up to three detail calls.
 - The resolver's last lifecycle label was `LOST / DORMANT`. The field is written as `LOST`. Zero qualifying orders stay `NO QUALIFYING ORDERS`, which is the resolver's label and is not one of the six non-empty stages.
