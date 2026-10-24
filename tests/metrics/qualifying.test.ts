@@ -13,6 +13,10 @@ describe("qualifying orders", () => {
   it("rejects cancelled, refunded, test, non-live, and zero-amount orders", () => {
     expect(isQualifyingOrder(order({ status: "cancelled" }))).toBe(false);
     expect(isQualifyingOrder(order({ status: "CANCELLED" }))).toBe(false);
+    expect(isQualifyingOrder(order({ status: "refunded", paymentStatus: "paid" }))).toBe(false);
+    expect(isQualifyingOrder(order({ status: " REFUNDED " }))).toBe(false);
+    expect(isQualifyingOrder(order({ status: "partially_refunded", paymentStatus: "paid" }))).toBe(false);
+    expect(isQualifyingOrder(order({ status: "Partially_Refunded" }))).toBe(false);
     expect(isQualifyingOrder(order({ paymentStatus: "refunded" }))).toBe(false);
     expect(isQualifyingOrder(order({ paymentStatus: "partially_refunded" }))).toBe(false);
     expect(isQualifyingOrder(order({ markAsTest: true }))).toBe(false);

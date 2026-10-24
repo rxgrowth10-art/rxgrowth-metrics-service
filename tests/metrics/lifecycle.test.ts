@@ -60,6 +60,8 @@ describe("lifecycle and customer status", () => {
         order({ amount: 15, paymentStatus: "unpaid", createdAt: "2026-05-01T12:00:00.000Z" }),
         order({ amount: 40, paymentStatus: "refunded", createdAt: "2026-05-02T12:00:00.000Z" }),
         order({ amount: 5, status: "cancelled", createdAt: "2026-05-03T12:00:00.000Z" }),
+        order({ amount: 22, status: "refunded", paymentStatus: "paid", createdAt: "2026-05-05T12:00:00.000Z" }),
+        order({ amount: 7, status: "partially_refunded", paymentStatus: "paid", createdAt: "2026-05-06T12:00:00.000Z" }),
         order({ amount: 9, markAsTest: true, createdAt: "2026-05-04T12:00:00.000Z" }),
       ],
       "UTC",
