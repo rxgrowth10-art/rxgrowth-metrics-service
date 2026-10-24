@@ -38,14 +38,20 @@ describe("logger", () => {
 
   it("hashes every contactId and never writes the raw id", () => {
     const raw = "contact1";
+    const other = "contact2";
     const redacted = redact({
       contactId: raw,
+      contact_id: raw,
+      contactIds: [raw, other, 4],
       nested: { contactId: raw },
       locationId: "loc1",
     });
     expect(JSON.stringify(redacted)).not.toContain(raw);
+    expect(JSON.stringify(redacted)).not.toContain(other);
     expect(redacted).toEqual({
       contactId: contactLogRef(raw),
+      contact_id: contactLogRef(raw),
+      contactIds: [contactLogRef(raw), contactLogRef(other), 4],
       nested: { contactId: contactLogRef(raw) },
       locationId: "loc1",
     });

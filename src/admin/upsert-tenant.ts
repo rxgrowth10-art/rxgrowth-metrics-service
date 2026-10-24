@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { assertAlphanumericId } from "../ids.js";
 import { encryptApiKey, parseEncryptionKey } from "../tenants/crypto.js";
 
 export const TENANT_UPSERT_SQL = `
@@ -40,6 +41,7 @@ export function tenantUpsertPlan(env: NodeJS.ProcessEnv, plaintext: string): Ten
   if (!databaseUrl) throw new Error("DATABASE_URL is not set");
   if (!rawKey) throw new Error("TENANT_KEY_ENCRYPTION_KEY is not set");
   if (!locationId) throw new Error("TENANT_LOCATION_ID is not set");
+  assertAlphanumericId(locationId, "TENANT_LOCATION_ID");
   const key = parseEncryptionKey(rawKey);
   if (!plaintext) throw new Error("Pass the GoHighLevel API key on stdin");
   const token = randomBytes(32).toString("base64url");

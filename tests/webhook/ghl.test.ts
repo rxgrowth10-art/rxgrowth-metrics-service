@@ -377,6 +377,33 @@ describe("GHL webhook", () => {
     }
   });
 
+  it("releases the contact lock when restoring the rerun flag throws", async () => {
+    const harness = deps({ failAt: 2 });
+    await harness.tenants.upsert(tenant());
+    const store = harness.deps.idempotency;
+    const originalDel = store.del.bind(store);
+    const originalSet = store.set.bind(store);
+    let armed = true;
+    let failRestore = false;
+    store.set = async (key, value, ttl) => {
+      if (failRestore && key === "rerun:loc1:contact1") throw new Error("rerun store down");
+      await originalSet(key, value, ttl);
+    };
+    store.del = async (key) => {
+      await originalDel(key);
+      if (armed && key === "lock:loc1:contact1") {
+        armed = false;
+        await store.set("rerun:loc1:contact1", "1", 120);
+        failRestore = true;
+      }
+    };
+    await expect(handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps)).rejects.toThrow(
+      "rerun store down",
+    );
+    expect(harness.listCalls()).toBe(2);
+    expect(await store.get("lock:loc1:contact1")).toBeNull();
+  });
+
   it("reads a standard GoHighLevel webhook from customData, then location.id and contact_id", async () => {
     const info = vi.spyOn(console, "log").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -387,20 +414,30 @@ describe("GHL webhook", () => {
         location: { id: string };
         contact_id: string;
         email: string;
+        tags: string;
+        attributionSource: { sessionSource: string };
+        contact: { attributionSource: { sessionSource: string } };
       };
+      expect(payload.location.id).toMatch(/^[A-Za-z0-9]{20}$/);
+      expect(payload.contact_id).toMatch(/^[A-Za-z0-9]{20}$/);
+      expect(payload.customData.locationId).toBe(payload.location.id);
+      expect(payload.customData.contactId).toBe(payload.contact_id);
+      expect(payload.tags).toContain(",");
+      expect(payload.attributionSource.sessionSource).toBe("Direct traffic");
+      expect(payload.contact.attributionSource.sessionSource).toBe("Direct traffic");
       const harness = deps();
-      await harness.tenants.upsert(tenant());
+      await harness.tenants.upsert(tenant({ locationId: payload.location.id }));
       const response = await handleGhlWebhook(post(payload), harness.deps);
       expect(response.status).toBe(202);
       expect(await response.json()).toMatchObject({ accepted: true, written: true });
-      expect(harness.seenKeys).toEqual(["loc1:pit-plaintext"]);
+      expect(harness.seenKeys).toEqual([`${payload.location.id}:pit-plaintext`]);
 
       const fallback = deps();
-      await fallback.tenants.upsert(tenant());
+      await fallback.tenants.upsert(tenant({ locationId: payload.location.id }));
       const { customData: _customData, ...withoutCustom } = payload;
       const fallbackResponse = await handleGhlWebhook(post(withoutCustom), fallback.deps);
       expect(fallbackResponse.status).toBe(202);
-      expect(fallback.seenKeys).toEqual(["loc1:pit-plaintext"]);
+      expect(fallback.seenKeys).toEqual([`${payload.location.id}:pit-plaintext`]);
 
       const customWins = deps();
       await customWins.tenants.upsert(tenant());

@@ -1,4 +1,5 @@
 import type { GhlClient } from "../ghl/index.js";
+import { ALPHANUMERIC_ID } from "../ids.js";
 import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token.js";
 import { json } from "../http/json.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
@@ -13,8 +14,6 @@ import {
 } from "../writeback/recompute.js";
 
 const EVENT_TTL_SECONDS = 300;
-/** GoHighLevel location and contact ids are short alphanumeric strings. */
-const ID_PATTERN = /^[A-Za-z0-9]{1,64}$/;
 
 export interface WebhookDeps {
   tenants: TenantStore;
@@ -92,17 +91,20 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
       } catch (error) {
         retry = { ok: false, message: error instanceof Error ? error.message : "unknown" };
       } finally {
-        if (!retry.ok) {
-          // runUntilQuiet clears the flag before computing. Restore it while the lock is still held
-          // so a request that arrives as the lock drops does not start a second recompute.
-          await deps.idempotency.set(rerunKey, "1", CONTACT_RERUN_TTL_SECONDS);
-          log("error", "webhook.rerun_failed", {
-            locationId: ids.locationId,
-            contactId: ids.contactId,
-            message: retry.message,
-          });
+        try {
+          if (!retry.ok) {
+            // runUntilQuiet clears the flag before computing. Restore it while the lock is still held
+            // so the single queued pass does not become a second recompute.
+            await deps.idempotency.set(rerunKey, "1", CONTACT_RERUN_TTL_SECONDS);
+            log("error", "webhook.rerun_failed", {
+              locationId: ids.locationId,
+              contactId: ids.contactId,
+              message: retry.message,
+            });
+          }
+        } finally {
+          await deps.idempotency.del(lockKey);
         }
-        await deps.idempotency.del(lockKey);
       }
     }
   }
@@ -156,7 +158,7 @@ function readId(value: unknown): string | null | undefined {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  if (!ID_PATTERN.test(trimmed)) return null;
+  if (!ALPHANUMERIC_ID.test(trimmed)) return null;
   return trimmed;
 }
 

@@ -15,8 +15,10 @@ export function redact(value: unknown, depth = 0): unknown {
   if (value && typeof value === "object") {
     const output: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(value)) {
-      if (key === "contactId" && typeof inner === "string") {
+      if ((key === "contactId" || key === "contact_id") && typeof inner === "string") {
         output[key] = contactLogRef(inner);
+      } else if (key === "contactIds" && Array.isArray(inner)) {
+        output[key] = inner.map((item) => (typeof item === "string" ? contactLogRef(item) : redact(item, depth + 1)));
       } else {
         output[key] = SENSITIVE_KEY.test(key) ? "[redacted]" : redact(inner, depth + 1);
       }

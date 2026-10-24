@@ -1,3 +1,4 @@
+import { assertAlphanumericId } from "../ids.js";
 import { encryptApiKey } from "./crypto.js";
 import type { Tenant, TenantStore } from "./types.js";
 
@@ -40,7 +41,7 @@ export function createEnvTenantStore(
 export function readTenantInput(env: NodeJS.ProcessEnv): TenantInput {
   const config = env.TENANT_CONFIG?.trim();
   if (config) return parseTenantConfig(config);
-  const locationId = requiredText(env.TENANT_LOCATION_ID, "TENANT_LOCATION_ID");
+  const locationId = assertAlphanumericId(requiredText(env.TENANT_LOCATION_ID, "TENANT_LOCATION_ID"), "TENANT_LOCATION_ID");
   return {
     locationId,
     name: optionalText(env.TENANT_NAME) ?? locationId,
@@ -65,7 +66,7 @@ function parseTenantConfig(raw: string): TenantInput {
     throw new Error("TENANT_CONFIG must be a JSON object");
   }
   const record = parsed as Record<string, unknown>;
-  const locationId = requiredText(record.locationId, "TENANT_CONFIG.locationId");
+  const locationId = assertAlphanumericId(requiredText(record.locationId, "TENANT_CONFIG.locationId"), "TENANT_CONFIG.locationId");
   return {
     locationId,
     name: optionalText(record.name) ?? locationId,
