@@ -5,7 +5,7 @@ import {
   calendarDayDifference,
   parseInstant,
   parseStoredDate,
-} from "../../src/time/business-date";
+} from "../../src/time/business-date.js";
 
 describe("business dates", () => {
   it("uses the tenant timezone calendar, not the UTC date", () => {

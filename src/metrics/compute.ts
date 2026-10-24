@@ -1,13 +1,13 @@
-import { addCalendarDays, businessDateString, calendarDayDifference } from "../time/business-date";
-import { frequencyBucket, trailing12MonthOrderCount } from "./frequency";
-import { averageIntervalDays, orderIntervalsDays, typicalIntervalDays } from "./intervals";
-import { customerStatus, customerType, lifecycleStage } from "./lifecycle";
-import { summarizeValue } from "./ltv";
-import { isQualifyingOrder, orderInstant } from "./qualifying";
-import { recencyBucket } from "./recency";
-import { round2 } from "./round";
-import { calculateTrend } from "./trends";
-import type { CustomerMetrics, MetricOrder } from "./types";
+import { addCalendarDays, businessDateString, calendarDayDifference } from "../time/business-date.js";
+import { frequencyBucket, trailing12MonthOrderCount } from "./frequency.js";
+import { averageIntervalDays, orderIntervalsDays, typicalIntervalDays } from "./intervals.js";
+import { customerStatus, customerType, lifecycleStage } from "./lifecycle.js";
+import { summarizeValue } from "./ltv.js";
+import { isQualifyingOrder, orderInstant } from "./qualifying.js";
+import { recencyBucket } from "./recency.js";
+import { round2 } from "./round.js";
+import { calculateTrend } from "./trends.js";
+import type { CustomerMetrics, MetricOrder } from "./types.js";
 
 export function computeM06(orders: readonly MetricOrder[], timeZone: string, now: Date): CustomerMetrics {
   const qualifying = orders.filter(isQualifyingOrder);

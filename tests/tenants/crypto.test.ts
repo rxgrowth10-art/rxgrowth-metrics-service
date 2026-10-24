@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { decryptApiKey, encryptApiKey, parseEncryptionKey } from "../../src/tenants/crypto";
+import { decryptApiKey, encryptApiKey, parseEncryptionKey } from "../../src/tenants/crypto.js";
 
 const KEY_B64 = Buffer.alloc(32, 7).toString("base64");
 const KEY_HEX = Buffer.alloc(32, 9).toString("hex");

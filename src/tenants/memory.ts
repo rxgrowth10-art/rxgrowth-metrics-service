@@ -1,4 +1,4 @@
-import type { Tenant, TenantStore } from "./types";
+import type { Tenant, TenantStore } from "./types.js";
 
 export class MemoryTenantStore implements TenantStore {
   private readonly tenants = new Map<string, Tenant>();

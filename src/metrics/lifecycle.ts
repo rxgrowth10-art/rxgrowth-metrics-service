@@ -1,4 +1,4 @@
-import type { CustomerStatus, CustomerType } from "./types";
+import type { CustomerStatus, CustomerType } from "./types.js";
 
 export function lifecycleStage(qualifyingOrderCount: number, recencyDays: number | null): string {
   if (qualifyingOrderCount === 0) return "NO QUALIFYING ORDERS";

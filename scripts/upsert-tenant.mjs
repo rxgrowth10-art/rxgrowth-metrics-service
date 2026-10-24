@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
+import { register } from "node:module";
 import { pathToFileURL } from "node:url";
 import { neon } from "@neondatabase/serverless";
-import { TENANT_UPSERT_SQL, tenantUpsertPlan } from "../src/admin/upsert-tenant.ts";
+
+register(new URL("./resolve-typescript.mjs", import.meta.url));
+const { TENANT_UPSERT_SQL, tenantUpsertPlan } = await import("../src/admin/upsert-tenant.js");
 
 function redact(message, secrets) {
   let text = message.replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted]");

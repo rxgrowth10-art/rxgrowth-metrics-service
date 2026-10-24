@@ -1,7 +1,7 @@
-import type { GhlClient } from "../ghl";
-import { GhlRequestError } from "../ghl/errors";
-import type { IdempotencyStore } from "../idempotency";
-import { buildFieldIdMap } from "./fields";
+import type { GhlClient } from "../ghl/index.js";
+import { GhlRequestError } from "../ghl/errors.js";
+import type { IdempotencyStore } from "../idempotency/index.js";
+import { buildFieldIdMap } from "./fields.js";
 
 export const FIELD_CACHE_TTL_SECONDS = 10 * 60;
 

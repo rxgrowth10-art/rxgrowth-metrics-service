@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeM06 } from "../../src/metrics";
-import { order } from "../helpers/orders";
+import { computeM06 } from "../../src/metrics/index.js";
+import { order } from "../helpers/orders.js";
 
 const NOW = new Date("2026-01-21T12:00:00.000Z");
 

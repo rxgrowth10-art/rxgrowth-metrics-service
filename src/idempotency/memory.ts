@@ -1,4 +1,4 @@
-import type { IdempotencyStore } from "./types";
+import type { IdempotencyStore } from "./types.js";
 
 interface Entry {
   value: string;

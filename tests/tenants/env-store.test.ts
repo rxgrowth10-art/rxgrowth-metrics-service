@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createDefaultDeps } from "../../src/runtime/deps";
-import { createEnvTenantStore, decryptApiKey, encryptApiKey, parseEncryptionKey } from "../../src/tenants";
+import { createDefaultDeps } from "../../src/runtime/deps.js";
+import { createEnvTenantStore, decryptApiKey, encryptApiKey, parseEncryptionKey } from "../../src/tenants/index.js";
 
 const KEY = parseEncryptionKey(Buffer.alloc(32, 9).toString("base64"));
 

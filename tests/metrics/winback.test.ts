@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeM06, evaluateWinback } from "../../src/metrics";
-import { order } from "../helpers/orders";
+import { computeM06, evaluateWinback } from "../../src/metrics/index.js";
+import { order } from "../helpers/orders.js";
 
 describe("win-back eligibility", () => {
   it("requires 3 qualifying orders, 21 days, and an overdue ratio of at least 1.5", () => {

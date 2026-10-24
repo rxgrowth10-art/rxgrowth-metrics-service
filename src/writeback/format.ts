@@ -1,5 +1,5 @@
-import type { CustomerMetrics } from "../metrics";
-import { fieldByKey } from "../schema/fields";
+import type { CustomerMetrics } from "../metrics/index.js";
+import { fieldByKey } from "../schema/fields.js";
 
 export function formatM06Values(metrics: CustomerMetrics): Record<string, string> {
   return {

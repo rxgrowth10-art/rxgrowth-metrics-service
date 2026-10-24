@@ -1,10 +1,10 @@
-export { MemoryIdempotencyStore } from "./memory";
-export type { IdempotencyStore } from "./types";
-export { createUpstashIdempotency, createUpstashIdempotencyFromEnv } from "./upstash";
+export { MemoryIdempotencyStore } from "./memory.js";
+export type { IdempotencyStore } from "./types.js";
+export { createUpstashIdempotency, createUpstashIdempotencyFromEnv } from "./upstash.js";
 
-import { MemoryIdempotencyStore } from "./memory";
-import type { IdempotencyStore } from "./types";
-import { createUpstashIdempotencyFromEnv, redisRestCredentials } from "./upstash";
+import { MemoryIdempotencyStore } from "./memory.js";
+import type { IdempotencyStore } from "./types.js";
+import { createUpstashIdempotencyFromEnv, redisRestCredentials } from "./upstash.js";
 
 export function createIdempotencyStore(env: NodeJS.ProcessEnv = process.env): IdempotencyStore {
   if (redisRestCredentials(env)) return createUpstashIdempotencyFromEnv(env);

@@ -1,14 +1,14 @@
-import type { GhlClient, GhlContact } from "../ghl";
-import { bearerMatches } from "../http/auth";
-import { json } from "../http/json";
-import type { IdempotencyStore } from "../idempotency";
-import { log } from "../log/logger";
-import { evaluateWinback, type WinbackDecision } from "../metrics/winback";
-import type { Tenant, TenantStore } from "../tenants";
-import { decryptApiKey } from "../tenants";
-import { businessDateString, calendarDayDifference, parseStoredDate } from "../time/business-date";
-import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap } from "../writeback/field-cache";
-import { readContactField, requireFieldId } from "../writeback/fields";
+import type { GhlClient, GhlContact } from "../ghl/index.js";
+import { bearerMatches } from "../http/auth.js";
+import { json } from "../http/json.js";
+import type { IdempotencyStore } from "../idempotency/index.js";
+import { log } from "../log/logger.js";
+import { evaluateWinback, type WinbackDecision } from "../metrics/winback.js";
+import type { Tenant, TenantStore } from "../tenants/index.js";
+import { decryptApiKey } from "../tenants/index.js";
+import { businessDateString, calendarDayDifference, parseStoredDate } from "../time/business-date.js";
+import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap } from "../writeback/field-cache.js";
+import { readContactField, requireFieldId } from "../writeback/fields.js";
 
 const LOCK_TTL_SECONDS = 60 * 60 * 36;
 const ENROLL_TTL_SECONDS = 60 * 60 * 24 * 180;

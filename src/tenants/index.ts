@@ -1,5 +1,5 @@
-export { decryptApiKey, encryptApiKey, parseEncryptionKey } from "./crypto";
-export { createEnvTenantStore } from "./env";
-export { MemoryTenantStore } from "./memory";
-export { createNeonTenantStore, mapTenantRow } from "./neon";
-export type { Tenant, TenantStore } from "./types";
+export { decryptApiKey, encryptApiKey, parseEncryptionKey } from "./crypto.js";
+export { createEnvTenantStore } from "./env.js";
+export { MemoryTenantStore } from "./memory.js";
+export { createNeonTenantStore, mapTenantRow } from "./neon.js";
+export type { Tenant, TenantStore } from "./types.js";

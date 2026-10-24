@@ -1,5 +1,5 @@
-import { parseInstant } from "../time/business-date";
-import type { MetricOrder } from "./types";
+import { parseInstant } from "../time/business-date.js";
+import type { MetricOrder } from "./types.js";
 
 const QUALIFYING_PAYMENT_STATUSES = new Set(["paid", "unpaid", "partially_paid"]);
 const EXCLUDED_ORDER_STATUSES = new Set(["cancelled", "refunded", "partially_refunded"]);

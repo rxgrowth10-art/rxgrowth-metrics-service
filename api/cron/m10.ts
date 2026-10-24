@@ -1,7 +1,7 @@
-import { handleM10Cron } from "../../src/cron/m10";
-import { json } from "../../src/http/json";
-import { log } from "../../src/log/logger";
-import { createDefaultDeps } from "../../src/runtime/deps";
+import { handleM10Cron } from "../../src/cron/m10.js";
+import { json } from "../../src/http/json.js";
+import { log } from "../../src/log/logger.js";
+import { createDefaultDeps } from "../../src/runtime/deps.js";
 
 export async function GET(request: Request): Promise<Response> {
   return run(request);

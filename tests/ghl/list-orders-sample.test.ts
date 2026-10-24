@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseOrderPage } from "../../src/ghl/parse";
-import { orderNeedsDetail } from "../../src/ghl/hydrate-orders";
-import { computeM06, isQualifyingOrder } from "../../src/metrics";
-import { coerceLastOrderType } from "../../src/writeback/format";
+import { parseOrderPage } from "../../src/ghl/parse.js";
+import { orderNeedsDetail } from "../../src/ghl/hydrate-orders.js";
+import { computeM06, isQualifyingOrder } from "../../src/metrics/index.js";
+import { coerceLastOrderType } from "../../src/writeback/format.js";
 
 const sample = JSON.parse(readFileSync(new URL("../../fixtures/list-orders-sample.json", import.meta.url), "utf8")) as unknown;
 

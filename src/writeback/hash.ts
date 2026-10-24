@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { M06_HASH_EXCLUDED_KEYS } from "../schema/fields";
+import { M06_HASH_EXCLUDED_KEYS } from "../schema/fields.js";
 
 const EXCLUDED = new Set<string>(M06_HASH_EXCLUDED_KEYS);
 

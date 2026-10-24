@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { encryptApiKey, parseEncryptionKey } from "../tenants/crypto.ts";
+import { encryptApiKey, parseEncryptionKey } from "../tenants/crypto.js";
 
 export const TENANT_UPSERT_SQL = `
 INSERT INTO tenants (

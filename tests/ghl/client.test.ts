@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createGhlClient, GHL_API_VERSION } from "../../src/ghl/client";
-import { LocationRateLimiter, type Clock } from "../../src/ghl/rate-limit";
+import { createGhlClient, GHL_API_VERSION } from "../../src/ghl/client.js";
+import { LocationRateLimiter, type Clock } from "../../src/ghl/rate-limit.js";
 
 const API_KEY = "super-secret-api-key-xyz";
 

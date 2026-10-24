@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { MemoryTenantStore, mapTenantRow, type Tenant } from "../../src/tenants";
+import { MemoryTenantStore, mapTenantRow, type Tenant } from "../../src/tenants/index.js";
 
 const tenant: Tenant = {
   locationId: "loc_1",

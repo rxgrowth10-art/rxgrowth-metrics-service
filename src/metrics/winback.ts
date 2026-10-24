@@ -1,4 +1,4 @@
-import { round2 } from "./round";
+import { round2 } from "./round.js";
 
 export const MIN_QUALIFYING_ORDERS = 3;
 export const MIN_DAYS_SINCE_LAST_ORDER = 21;

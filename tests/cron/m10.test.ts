@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GET } from "../../api/cron/m10";
-import { handleM10Cron, type M10Deps } from "../../src/cron/m10";
-import type { CustomFieldWrite, GhlClient, GhlContact } from "../../src/ghl";
-import { parseContactPage } from "../../src/ghl/parse";
-import { MemoryIdempotencyStore } from "../../src/idempotency";
-import { FIELDS } from "../../src/schema/fields";
-import { encryptApiKey, MemoryTenantStore, parseEncryptionKey, type Tenant } from "../../src/tenants";
+import { GET } from "../../api/cron/m10.js";
+import { handleM10Cron, type M10Deps } from "../../src/cron/m10.js";
+import type { CustomFieldWrite, GhlClient, GhlContact } from "../../src/ghl/index.js";
+import { parseContactPage } from "../../src/ghl/parse.js";
+import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
+import { FIELDS } from "../../src/schema/fields.js";
+import { encryptApiKey, MemoryTenantStore, parseEncryptionKey, type Tenant } from "../../src/tenants/index.js";
 
 const KEY = parseEncryptionKey(Buffer.alloc(32, 5).toString("base64"));
 const NOW = new Date("2026-06-22T12:00:00.000Z");

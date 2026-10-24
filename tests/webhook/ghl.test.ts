@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { POST } from "../../api/webhooks/ghl";
-import type { GhlClient } from "../../src/ghl";
-import { MemoryIdempotencyStore } from "../../src/idempotency";
-import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields";
-import { hashWebhookToken } from "../../src/http/webhook-token";
-import { encryptApiKey, MemoryTenantStore, parseEncryptionKey, type Tenant } from "../../src/tenants";
-import type { WebhookDeps } from "../../src/webhook/handle";
-import { handleGhlWebhook } from "../../src/webhook/handle";
-import { order } from "../helpers/orders";
+import { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT } from "../../api/webhooks/ghl.js";
+import type { GhlClient } from "../../src/ghl/index.js";
+import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
+import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
+import { hashWebhookToken } from "../../src/http/webhook-token.js";
+import { encryptApiKey, MemoryTenantStore, parseEncryptionKey, type Tenant } from "../../src/tenants/index.js";
+import type { WebhookDeps } from "../../src/webhook/handle.js";
+import { handleGhlWebhook } from "../../src/webhook/handle.js";
+import { order } from "../helpers/orders.js";
 
 const KEY = parseEncryptionKey(Buffer.alloc(32, 4).toString("base64"));
 const NOW = new Date("2026-01-21T12:00:00.000Z");
@@ -328,7 +328,9 @@ describe("GHL webhook", () => {
     expect((await handleGhlWebhook(post({ locationId: "loc_1" }), harness.deps)).status).toBe(400);
     const request = new Request("https://example.test/api/webhooks/ghl", { method: "POST", body: "{" });
     expect((await handleGhlWebhook(request, harness.deps)).status).toBe(400);
-    expect((await handleGhlWebhook(new Request("https://example.test/api/webhooks/ghl"), harness.deps)).status).toBe(405);
+    const method = await handleGhlWebhook(new Request("https://example.test/api/webhooks/ghl"), harness.deps);
+    expect(method.status).toBe(405);
+    expect(method.headers.get("allow")).toBe("POST");
   });
 });
 
@@ -345,5 +347,21 @@ describe("POST /api/webhooks/ghl", () => {
     const response = await POST(post({ locationId: "loc_1", contactId: "c" }));
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "misconfigured" });
+  });
+
+  it("returns 405 with Allow: POST for non-POST methods", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("TENANT_KEY_ENCRYPTION_KEY", "");
+    vi.stubEnv("KV_REST_API_URL", "");
+    vi.stubEnv("KV_REST_API_TOKEN", "");
+    for (const handler of [GET, PUT, PATCH, DELETE, OPTIONS, HEAD]) {
+      const response = await handler();
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST");
+      expect(await response.json()).toEqual({ error: "method_not_allowed" });
+    }
+    const posted = await POST(new Request("https://example.test/api/webhooks/ghl", { method: "GET" }));
+    expect(posted.status).toBe(405);
+    expect(posted.headers.get("allow")).toBe("POST");
   });
 });

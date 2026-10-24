@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bearerMatches, headerMatches } from "../../src/http/auth";
+import { bearerMatches, headerMatches } from "../../src/http/auth.js";
 
 describe("shared secrets", () => {
   it("compares bearer tokens and headers in constant time", () => {

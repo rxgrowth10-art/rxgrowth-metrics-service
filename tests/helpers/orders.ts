@@ -1,4 +1,4 @@
-import type { GhlOrder } from "../../src/ghl";
+import type { GhlOrder } from "../../src/ghl/index.js";
 
 export function order(overrides: Partial<GhlOrder> = {}): GhlOrder {
   return {
