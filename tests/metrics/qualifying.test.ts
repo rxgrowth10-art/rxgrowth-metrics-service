@@ -16,6 +16,8 @@ describe("qualifying orders", () => {
     expect(isQualifyingOrder(order({ paymentStatus: "refunded" }))).toBe(false);
     expect(isQualifyingOrder(order({ paymentStatus: "partially_refunded" }))).toBe(false);
     expect(isQualifyingOrder(order({ markAsTest: true }))).toBe(false);
+    expect(isQualifyingOrder(order({ markAsTest: null, paymentStatus: "unpaid" }))).toBe(true);
+    expect(isQualifyingOrder(order({ paymentStatus: null }))).toBe(false);
     expect(isQualifyingOrder(order({ liveMode: false }))).toBe(false);
     expect(isQualifyingOrder(order({ liveMode: null }))).toBe(false);
     expect(isQualifyingOrder(order({ amount: 0 }))).toBe(false);

@@ -15,18 +15,22 @@ This revision adds the M06 webhook on top of the foundation. The M10 daily cron 
 - `migrations/001_tenants.sql` — Neon schema.
 - `fixtures/test-lab-fields.json` — final custom-field snapshot for location `ekxOqjUKW7M6OV9XAVnx`.
 
-- `api/webhooks/ghl.ts` — M06 nudge. `POST` JSON `{ "locationId", "contactId" }`. Any other property is ignored. Unknown or inactive tenants return 202 without calling GoHighLevel. A repeat of the same event within 300 seconds is processed once.
+- `api/webhooks/ghl.ts` — M06 nudge. `POST` JSON `{ "locationId", "contactId" }`. Any other property is ignored. Unknown or inactive tenants return 202 without calling GoHighLevel. A second nudge is not dropped; an unchanged metrics hash skips the write.
 - `api/cron/m10.ts` — daily win-back pass, still to be added. It will require `Authorization: Bearer $CRON_SECRET`.
 
 ## Webhook
 
 ```bash
-curl -X POST https://<deployment>/api/webhooks/ghl \
+curl -X POST 'https://<deployment>/api/webhooks/ghl?t=TENANT_WEBHOOK_TOKEN' \
   -H 'content-type: application/json' \
   -d '{"locationId":"LOCATION_ID","contactId":"CONTACT_ID"}'
 ```
 
-The handler returns 202 after it re-fetches orders and either writes metrics or skips an unchanged hash. It returns 400 when `locationId` or `contactId` is missing, 401 when `WEBHOOK_SHARED_SECRET` is set and `x-webhook-secret` does not match, and 500 when processing fails so the sender can retry. A standard GoHighLevel Webhook action cannot sign requests, so the shared-secret header is optional until something in front of the function adds it.
+The handler returns 202 after it re-fetches orders and either writes metrics or skips an unchanged hash. It returns 400 when `locationId` or `contactId` is missing, 401 when the tenant's `?t=` token does not match `webhook_token_hash`, and 500 when processing fails so the sender can retry. In production the hash is required. Outside production a tenant with no hash is accepted so tests can run. The payload is only a signal. There is no shared webhook secret: a standard GoHighLevel Webhook action cannot set headers, so each location's workflow URL carries that tenant's token. Query strings are stripped from logs.
+
+A nudge with no `eventId` is always computed, guarded by a 30 second per-contact lock. If a second nudge arrives while that lock is held, it is queued and the in-flight run computes once more after it finishes, so a new order a few seconds later is not dropped. An explicit `eventId` or `webhookId` is still deduped for 300 seconds.
+
+List items that already include `paymentStatus` and `liveMode` are used as-is. `markAsTest` is often absent and then means not a test order. If `paymentStatus` or `liveMode` is missing, the service fetches `GET /payments/orders/{orderId}` with `altId` and `altType=location` before applying the qualifying rule. Orders whose `contactId` is some other contact are dropped. `altId` and `altType=location` are sent on every order request.
 
 M06 never writes `winback_eligibility` or `winback_tier`.
 
@@ -165,15 +169,16 @@ The workflow owns `winback_cycle_status` and `winback_cycle_started_at`. This se
 
 | Key | TTL | Meaning |
 | --- | --- | --- |
-| `evt:{locationId}:{contactId}:{eventId-or-derived}` | 300s | One webhook computation per event |
+| `evt:{locationId}:{contactId}:{eventId}` | 300s | Only when the payload includes `eventId` or `webhookId`. A derived contact hash is not used. |
 | `lock:{locationId}:{contactId}` | 30s | One in-flight computation per contact |
+| `rerun:{locationId}:{contactId}` | 120s | A nudge arrived during the lock and must be computed again |
 | `m10:{locationId}:{YYYY-MM-DD}` | through the tenant's calendar day | One daily cron pass per location |
 
 `YYYY-MM-DD` is the date in the tenant timezone.
 
 ## GoHighLevel client
 
-Orders: `GET /payments/orders` with `locationId`, `altId`, `altType=location`, `contactId`, `limit`, and `offset`. Pages continue until `totalCount` is covered. The client does not issue one `limit=500` request. A page cap throws instead of writing metrics from a partial history.
+Orders: `GET /payments/orders` with `locationId`, `altId`, `altType=location`, `contactId`, `limit`, and `offset`. Pages continue until `totalCount` is covered. The client does not issue one `limit=500` request. A page cap throws instead of writing metrics from a partial history. Orders for a different `contactId` are dropped. `fixtures/list-orders-sample.json` is a redacted live list payload: `amount` is major units after discount, `paymentStatus` and `liveMode` are present, and `markAsTest` is absent.
 
 Contacts for the cron: `POST /contacts/search` with `pageLimit` and `searchAfter`.
 

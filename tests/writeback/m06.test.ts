@@ -22,6 +22,9 @@ function clientWith(orders = [order({ amount: 25.5, sourceSubType: "delivery" })
     async listOrders() {
       return orders;
     },
+    async getOrder() {
+      return null;
+    },
     async getContact(): Promise<GhlContact> {
       return {
         id: "contact_1",
