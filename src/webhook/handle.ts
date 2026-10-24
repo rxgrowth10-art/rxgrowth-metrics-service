@@ -39,11 +39,6 @@ export async function handleGhlWebhook(request: Request, deps: WebhookDeps): Pro
   if (!ids) return json({ error: "locationId and contactId are required" }, 400);
 
   const tenant = await deps.tenants.getByLocationId(ids.locationId);
-  if (!tenant || !tenant.active) {
-    const reason = tenant ? "inactive_tenant" : "unknown_tenant";
-    log("info", "webhook.skipped", { locationId: ids.locationId, contactId: ids.contactId, reason });
-    return json({ accepted: false, reason }, 202);
-  }
   if (!authorized(request, tenant)) {
     log("warn", "webhook.unauthorized", { locationId: ids.locationId, contactId: ids.contactId });
     return json({ error: "unauthorized" }, 401);
@@ -131,9 +126,9 @@ async function compute(
   return { written: result.written };
 }
 
-function authorized(request: Request, tenant: Tenant): boolean {
-  if (!tenant.webhookTokenHash) return false;
-  return webhookTokenMatches(readWebhookToken(request), tenant.webhookTokenHash);
+function authorized(request: Request, tenant: Tenant | null): tenant is Tenant {
+  const matches = webhookTokenMatches(readWebhookToken(request), tenant?.webhookTokenHash ?? null);
+  return Boolean(tenant?.active) && matches;
 }
 
 function readIds(body: unknown): { locationId: string; contactId: string } | null {

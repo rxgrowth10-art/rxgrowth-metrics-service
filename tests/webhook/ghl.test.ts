@@ -148,20 +148,31 @@ describe("GHL webhook", () => {
     expect(harness.updates[0]?.winback_eligibility).toBeUndefined();
   });
 
-  it("accepts an unknown or inactive tenant without calling GoHighLevel", async () => {
+  it("returns the same 401 for an unknown tenant, an inactive tenant, and a bad token", async () => {
     const harness = deps();
+    await harness.tenants.upsert(tenant());
+    const badToken = await handleGhlWebhook(
+      postUrl({ locationId: "loc_1", contactId: "contact_1" }, "https://example.test/api/webhooks/ghl?t=wrong"),
+      harness.deps,
+    );
     const unknown = await handleGhlWebhook(
       post({ locationId: "missing", contactId: "contact_1" }),
       harness.deps,
     );
-    expect(unknown.status).toBe(202);
-    expect(await unknown.json()).toMatchObject({ accepted: false, reason: "unknown_tenant" });
     await harness.tenants.upsert(tenant({ active: false }));
     const inactive = await handleGhlWebhook(
       post({ locationId: "loc_1", contactId: "contact_1" }),
       harness.deps,
     );
-    expect(await inactive.json()).toMatchObject({ accepted: false, reason: "inactive_tenant" });
+    const badBody = await badToken.json();
+    expect(badToken.status).toBe(401);
+    expect(unknown.status).toBe(badToken.status);
+    expect(inactive.status).toBe(badToken.status);
+    expect(await unknown.json()).toEqual(badBody);
+    expect(await inactive.json()).toEqual(badBody);
+    expect(badBody).toEqual({ error: "unauthorized" });
+    expect(JSON.stringify(badBody)).not.toContain("unknown");
+    expect(JSON.stringify(badBody)).not.toContain("inactive");
     expect(harness.listCalls()).toBe(0);
     expect(harness.seenKeys).toEqual([]);
   });

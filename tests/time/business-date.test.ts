@@ -46,4 +46,19 @@ describe("business dates", () => {
     expect(parseStoredDate("02-31-2026", "America/New_York")).toBeNull();
     expect(businessDateString(new Date("2026-10-21T00:00:00.000Z"), "America/New_York")).toBe("2026-10-20");
   });
+
+  it("rejects unlisted date shapes and impossible calendar days", () => {
+    expect(parseStoredDate("10/21/2026", "America/Chicago")).toBeNull();
+    expect(parseStoredDate("2026/10/21", "America/Chicago")).toBeNull();
+    expect(parseStoredDate("October 21, 2026", "UTC")).toBeNull();
+    expect(parseStoredDate("2026-02-31", "UTC")).toBeNull();
+    expect(parseStoredDate("2026-02-31T00:00:00.000Z", "UTC")).toBeNull();
+    expect(parseStoredDate("2026-04-31", "UTC")).toBeNull();
+    expect(parseStoredDate("2026-02-29", "UTC")).toBeNull();
+    expect(parseStoredDate("2024-02-29", "UTC")).toBe("2024-02-29");
+    expect(parseStoredDate("2026-10-21T23:30:00-05:00", "America/Chicago")).toBe("2026-10-22");
+    const epochMs = Date.parse("2026-10-21T00:00:00.000Z");
+    expect(parseStoredDate(Math.floor(epochMs / 1000), "UTC")).toBeNull();
+    expect(parseStoredDate(String(Math.floor(epochMs / 1000)), "UTC")).toBeNull();
+  });
 });
