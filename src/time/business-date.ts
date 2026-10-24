@@ -20,13 +20,13 @@ export function parseInstant(value: unknown): Date | null {
 
 /**
  * Calendar day for a DATE custom field stored on a contact.
+ * The result is the calendar Y-M-D only. Nothing here is converted into the tenant timezone.
  * `YYYY-MM-DD` stays that day. `MM-DD-YYYY` is the legacy formatter.
- * Contact search returns the same field as ISO midnight UTC (`...T00:00:00.000Z`);
- * that UTC year-month-day is the calendar date and is not shifted into the tenant timezone.
- * Epoch milliseconds, as a number or a numeric string, use the UTC calendar date too.
- * Any other ISO timestamp is still a real instant and uses the tenant timezone.
+ * An ISO timestamp, including the midnight UTC string contact search returns
+ * (`2026-10-21T00:00:00.000Z`), uses that instant's UTC year-month-day.
+ * Epoch milliseconds, as a number or a numeric string, do too.
  */
-export function parseStoredDate(value: unknown, timeZone: string): string | null {
+export function parseStoredDate(value: unknown, _timeZone: string): string | null {
   if (typeof value === "number" && Number.isFinite(value)) return utcCalendarDate(instantFromEpoch(value));
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -39,7 +39,7 @@ export function parseStoredDate(value: unknown, timeZone: string): string | null
   if (/^\d+$/.test(trimmed)) return utcCalendarDate(instantFromEpoch(Number(trimmed)));
   const instant = parseInstant(trimmed);
   if (!instant) return null;
-  return businessDateString(instant, timeZone);
+  return utcCalendarDate(instant);
 }
 
 export function businessDateString(date: Date, timeZone: string): string | null {

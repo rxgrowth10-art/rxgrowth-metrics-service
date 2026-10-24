@@ -25,7 +25,7 @@ describe("business dates", () => {
   it("parses calendar dates, ISO timestamps, and epoch milliseconds", () => {
     const epochMs = Date.parse("2026-01-01T00:00:00.000Z");
     expect(parseStoredDate("2026-01-01", "America/New_York")).toBe("2026-01-01");
-    expect(parseStoredDate("2026-01-01T22:30:00.000Z", "Africa/Cairo")).toBe("2026-01-02");
+    expect(parseStoredDate("2026-01-01T22:30:00.000Z", "Africa/Cairo")).toBe("2026-01-01");
     expect(parseInstant(epochMs)?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
     expect(parseInstant(String(epochMs))?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
     expect(parseInstant(String(Math.floor(epochMs / 1000)))?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
@@ -39,6 +39,7 @@ describe("business dates", () => {
     expect(parseStoredDate("2026-10-21", "America/New_York")).toBe("2026-10-21");
     expect(parseStoredDate("10-21-2026", "America/New_York")).toBe("2026-10-21");
     expect(parseStoredDate("2026-10-21T00:00:00.000Z", "America/New_York")).toBe("2026-10-21");
+    expect(parseStoredDate("2026-10-21T00:00:00.000Z", "America/Chicago")).toBe("2026-10-21");
     expect(parseStoredDate("2026-10-21T00:00:00Z", "America/New_York")).toBe("2026-10-21");
     expect(parseStoredDate(epochMs, "America/New_York")).toBe("2026-10-21");
     expect(parseStoredDate(String(epochMs), "America/New_York")).toBe("2026-10-21");

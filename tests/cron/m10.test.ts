@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../../api/cron/m10";
 import { handleM10Cron, type M10Deps } from "../../src/cron/m10";
 import type { CustomFieldWrite, GhlClient, GhlContact } from "../../src/ghl";
+import { parseContactPage } from "../../src/ghl/parse";
 import { MemoryIdempotencyStore } from "../../src/idempotency";
 import { FIELDS } from "../../src/schema/fields";
 import { encryptApiKey, MemoryTenantStore, parseEncryptionKey, type Tenant } from "../../src/tenants";
@@ -17,6 +19,7 @@ function tenant(overrides: Partial<Tenant> = {}): Tenant {
     timezone: "UTC",
     currency: "EGP",
     m10WorkflowId: "wf_m10",
+    webhookTokenHash: null,
     active: true,
     ...overrides,
   };
@@ -46,6 +49,9 @@ function harness(options?: {
   let enrollFailuresLeft = options?.failEnrollTimes ?? 0;
   const ghl: GhlClient = {
     async listOrders() {
+      throw new Error("m10 must not refetch orders");
+    },
+    async getOrder() {
       throw new Error("m10 must not refetch orders");
     },
     async getContact() {
@@ -299,6 +305,44 @@ describe("M10 win-back cron", () => {
     const retried = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
     expect(((await retried.json()) as { written: number; errors: number }).written).toBe(1);
     expect(run.searches()).toBe(2);
+  });
+
+  it("keeps a Chicago search midnight on 2026-10-21 so twenty days stays Not Eligible", async () => {
+    const run = harness({
+      contacts: [
+        contact("chicago", {
+          qualifying_order_count: "3",
+          last_order_date: "2026-10-21T00:00:00.000Z",
+          typical_order_interval_days: "14",
+        }),
+      ],
+    });
+    run.deps.now = () => new Date("2026-11-10T18:00:00.000Z");
+    await run.tenants.upsert(tenant({ timezone: "America/Chicago" }));
+    const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(response.status).toBe(200);
+    expect(run.updates[0]?.fields.map((field) => field.value)).toEqual(["Not Eligible", "None"]);
+  });
+
+  it("reads every search DATE shape as 2026-10-21 for a timezone behind UTC", async () => {
+    const page = parseContactPage(JSON.parse(readFileSync("fixtures/contact-search-dates.json", "utf8")) as unknown);
+    const contacts = page.contacts.map((person) => {
+      const last = person.customFields.find((field) => field.id === "WUgA196HILTt2ul6vfqf")?.value;
+      if (!person.id || !last) throw new Error("fixture contact is missing an id or last_order_date");
+      return contact(person.id, {
+        qualifying_order_count: "3",
+        last_order_date: last,
+        typical_order_interval_days: "14",
+      });
+    });
+    const run = harness({ contacts });
+    run.deps.now = () => new Date("2026-11-10T18:00:00.000Z");
+    await run.tenants.upsert(tenant({ timezone: "America/Chicago" }));
+    await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(run.updates).toHaveLength(4);
+    for (const update of run.updates) {
+      expect(update.fields.map((field) => field.value)).toEqual(["Not Eligible", "None"]);
+    }
   });
 });
 

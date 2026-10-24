@@ -7,7 +7,8 @@ import { evaluateWinback, type WinbackDecision } from "../metrics/winback";
 import type { Tenant, TenantStore } from "../tenants";
 import { decryptApiKey } from "../tenants";
 import { businessDateString, calendarDayDifference, parseStoredDate } from "../time/business-date";
-import { buildFieldIdMap, readContactField, requireFieldId } from "../writeback/fields";
+import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap } from "../writeback/field-cache";
+import { readContactField, requireFieldId } from "../writeback/fields";
 
 const LOCK_TTL_SECONDS = 60 * 60 * 36;
 const ENROLL_TTL_SECONDS = 60 * 60 * 24 * 180;
@@ -70,6 +71,7 @@ export async function runM10Cron(deps: M10Deps): Promise<M10Summary> {
     } catch (error) {
       summary.errors += 1;
       await deps.idempotency.del(lockKey);
+      if (isUnknownFieldError(error)) await invalidateFieldCache(deps.idempotency, tenant.locationId);
       log("error", "m10.tenant_failed", {
         locationId: tenant.locationId,
         message: error instanceof Error ? error.message : "unknown",
@@ -80,7 +82,7 @@ export async function runM10Cron(deps: M10Deps): Promise<M10Summary> {
 }
 
 async function runTenant(client: GhlClient, tenant: Tenant, deps: M10Deps, summary: M10Summary): Promise<void> {
-  const ids = buildFieldIdMap(await client.listCustomFields());
+  const ids = await loadFieldIdMap(client, deps.idempotency, tenant.locationId);
   requireFieldId(ids, "winback_eligibility");
   requireFieldId(ids, "winback_tier");
   const contacts = await client.searchContacts();
