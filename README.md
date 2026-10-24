@@ -37,9 +37,9 @@ M06 never writes `winback_eligibility` or `winback_tier`.
 
 ## Daily win-back cron
 
-Vercel invokes `GET /api/cron/m10` at 03:00 UTC (`0 3 * * *`). The handler rejects the call unless `CRON_SECRET` is set and the bearer token matches. It lists active tenants and calls `POST /api/cron/m10-tenant?locationId=` once per tenant, in parallel, with the same bearer token. Each tenant function has its own 300 second limit, so one slow location does not consume the budget of the others.
+Vercel invokes `GET /api/cron/m10` at 03:00 UTC (`0 3 * * *`). The handler rejects the call unless `CRON_SECRET` is set and the bearer token matches. It lists active tenants and calls `POST /api/cron/m10-tenant?locationId=` once per tenant, in parallel, with the same bearer token. Each tenant function has its own 300 second limit, so one slow location does not consume the budget of the others. One tenant invocation that throws is logged and counted, and the other tenants still finish. The cron returns 200 unless every tenant invocation failed, or configuration is missing. Zero active tenants is a successful empty run.
 
-A tenant hop holds `m10:{locationId}:{YYYY-MM-DD}` for at most 120 seconds and deletes that lock when the hop finishes, including when it throws. Another run the same local day is allowed once the lock is gone; the field writes are unchanged when the values already match. While the lock is held, a second hop skips that tenant. Contact search is paged with `searchAfter`. After 240 seconds the hop stores `m10cursor:{locationId}:{YYYY-MM-DD}` and schedules another call to the tenant route. The next hop starts at that cursor and does not repeat the earlier page. `waitUntil` is used when the platform provides it.
+A tenant hop holds `m10:{locationId}:{YYYY-MM-DD}` for at least 360 seconds, longer than the 300 second function limit, and deletes that lock when the hop finishes, including when it throws. Another run the same local day is allowed once the lock is gone; the field writes are unchanged when the values already match. While the lock is held, a second hop skips that tenant. Contact search is paged with `searchAfter`. After 240 seconds the hop stores `m10cursor:{locationId}:{YYYY-MM-DD}` and schedules another call to the tenant route with `waitUntil` from `@vercel/functions`. The next hop starts at that cursor and does not repeat the earlier page.
 
 The cron does not re-fetch orders. It reads the M06 fields already on the contact:
 
@@ -56,7 +56,7 @@ The only fields written are `winback_eligibility` and `winback_tier`, and only w
 ## Divergences from the M10 calculator
 
 - The calculator read `total_orders`. The cron prefers `qualifying_order_count` and uses `total_orders` only when that field is empty. After M06 those two counts are the same full qualifying count.
-- The calculator parsed `last_order_date` with `new Date(...)` and then converted to `Africa/Cairo`. A stored `YYYY-MM-DD` is treated as that calendar date in the tenant timezone. `new Date("2026-01-01")` is UTC midnight, which is still 1 January in Cairo and 31 December in New York.
+- The calculator parsed `last_order_date` with `new Date(...)` and then converted to `Africa/Cairo`. A stored DATE field is a calendar year-month-day with no tenant-timezone conversion: `YYYY-MM-DD`, legacy `MM-DD-YYYY`, any ISO timestamp by its UTC day, or epoch milliseconds as that UTC day. `2026-10-21T00:00:00.000Z` stays 2026-10-21 in America/Chicago.
 - The calculator can emit `daysOverdue`. The cron does not write it. M06 already writes `days_overdue`, rounded to two decimals.
 - Tier stays `None` unless the contact is eligible. That matches the calculator and not the M06 resolver, which assigned a tier from the ratio alone.
 
@@ -198,7 +198,7 @@ The workflow owns `winback_cycle_status` and `winback_cycle_started_at`. This se
 | `evt:{locationId}:{contactId}:{eventId}` | 300s | Only when the payload includes `eventId` or `webhookId`. A derived contact hash is not used. |
 | `lock:{locationId}:{contactId}` | 30s | One in-flight computation per contact |
 | `rerun:{locationId}:{contactId}` | 120s | A nudge arrived during the lock and must be computed again |
-| `m10:{locationId}:{YYYY-MM-DD}` | 120 seconds, released when the hop finishes | One in-flight M10 hop per location. The date is the tenant's calendar day. |
+| `m10:{locationId}:{YYYY-MM-DD}` | at least 360 seconds, released when the hop finishes | One in-flight M10 hop per location. The date is the tenant's calendar day. The TTL is longer than the 300 second function limit. |
 | `m10cursor:{locationId}:{YYYY-MM-DD}` | 2 hours | `searchAfter` cursor when a tenant hop stops for the time budget. |
 | `m10enroll:{locationId}:{contactId}` | 180 days | Workflow enrollment already succeeded for this eligibility stretch. Deleted when the contact is not eligible. |
 

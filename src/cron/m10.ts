@@ -10,7 +10,8 @@ import { businessDateString, calendarDayDifference, parseStoredDate } from "../t
 import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap } from "../writeback/field-cache.js";
 import { readContactField, requireFieldId } from "../writeback/fields.js";
 
-const LOCK_TTL_SECONDS = 120;
+/** Longer than the 300s function limit so a second run cannot overlap a live hop. */
+const LOCK_TTL_SECONDS = 360;
 const CURSOR_TTL_SECONDS = 60 * 60 * 2;
 const ENROLL_TTL_SECONDS = 60 * 60 * 24 * 180;
 const DEFAULT_BUDGET_MS = 240_000;
@@ -60,9 +61,10 @@ export async function handleM10Cron(request: Request, deps: M10Deps): Promise<Re
     log("warn", "m10.unauthorized", { configured: Boolean(deps.cronSecret) });
     return json({ error: "unauthorized" }, 401);
   }
-  const summary = await runM10Cron(deps);
-  log("info", "m10.finished", { ...summary });
-  return json({ ok: true, ...summary });
+  const outcome = await runM10CronOutcome(deps);
+  log("info", "m10.finished", { ...outcome.summary });
+  if (outcome.allFailed) return json({ ok: false, ...outcome.summary }, 500);
+  return json({ ok: true, ...outcome.summary });
 }
 
 export async function handleM10Tenant(request: Request, deps: M10Deps): Promise<Response> {
@@ -87,11 +89,12 @@ export async function handleM10Tenant(request: Request, deps: M10Deps): Promise<
 }
 
 export async function runM10Cron(deps: M10Deps): Promise<M10Summary> {
+  return (await runM10CronOutcome(deps)).summary;
+}
+
+async function runM10CronOutcome(deps: M10Deps): Promise<{ summary: M10Summary; allFailed: boolean }> {
   const tenants = await deps.tenants.listActive();
-  if (deps.invokeTenant) {
-    const invokeTenant = deps.invokeTenant;
-    return mergeSummaries(await Promise.all(tenants.map((tenant) => invokeTenant(tenant.locationId))));
-  }
+  if (deps.invokeTenant) return fanOutTenants(deps.invokeTenant, tenants);
   const summary = emptySummary();
   for (const tenant of tenants) {
     let hops = 0;
@@ -102,7 +105,49 @@ export async function runM10Cron(deps: M10Deps): Promise<M10Summary> {
       hops += 1;
     } while (result.continue && hops < MAX_INLINE_HOPS);
   }
-  return summary;
+  return { summary, allFailed: false };
+}
+
+async function fanOutTenants(
+  invokeTenant: (locationId: string) => Promise<M10Summary>,
+  tenants: readonly Tenant[],
+): Promise<{ summary: M10Summary; allFailed: boolean }> {
+  const settled = await Promise.allSettled(
+    tenants.map(async (tenant) => {
+      const started = Date.now();
+      try {
+        const summary = await invokeTenant(tenant.locationId);
+        log("info", "m10.tenant_result", {
+          locationId: tenant.locationId,
+          status: "ok",
+          durationMs: Date.now() - started,
+        });
+        return summary;
+      } catch (error) {
+        log("error", "m10.tenant_result", {
+          locationId: tenant.locationId,
+          status: "error",
+          durationMs: Date.now() - started,
+          message: error instanceof Error ? error.message : "unknown",
+        });
+        throw error;
+      }
+    }),
+  );
+  const parts: M10Summary[] = [];
+  let failed = 0;
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      parts.push(result.value);
+      continue;
+    }
+    failed += 1;
+    parts.push({ ...emptySummary(), tenants: 1, errors: 1 });
+  }
+  return {
+    summary: mergeSummaries(parts),
+    allFailed: tenants.length > 0 && failed === tenants.length,
+  };
 }
 
 export async function runM10Tenant(deps: M10Deps, tenant: Tenant): Promise<M10TenantResult> {

@@ -11,6 +11,20 @@ import { encryptApiKey, MemoryTenantStore, parseEncryptionKey, type Tenant } fro
 const KEY = parseEncryptionKey(Buffer.alloc(32, 5).toString("base64"));
 const NOW = new Date("2026-06-22T12:00:00.000Z");
 
+function loggedEvents(spy: { mock: { calls: unknown[][] } }): Array<{ event: string; data: Record<string, unknown> }> {
+  return spy.mock.calls.flatMap((call) => {
+    const text = call[0];
+    if (typeof text !== "string") return [];
+    try {
+      const parsed = JSON.parse(text) as { event?: string; data?: Record<string, unknown> };
+      if (!parsed.event || !parsed.data) return [];
+      return [{ event: parsed.event, data: parsed.data }];
+    } catch {
+      return [];
+    }
+  });
+}
+
 function tenant(overrides: Partial<Tenant> = {}): Tenant {
   return {
     locationId: "loc_1",
@@ -420,9 +434,92 @@ describe("M10 win-back cron", () => {
       };
     };
     const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
-    expect(await response.json()).toMatchObject({ tenants: 2, contacts: 0 });
+    expect(await response.json()).toMatchObject({ ok: true, tenants: 2, contacts: 0 });
     expect(seen.sort()).toEqual(["loc_1", "loc_2"]);
     expect(run.searches()).toBe(0);
+  });
+
+  it("holds the tenant lock for at least 360 seconds and releases it when the hop ends", async () => {
+    const run = harness({ contacts: [contact("lead", {})] });
+    const ttls: number[] = [];
+    const setNx = run.deps.idempotency.setNx.bind(run.deps.idempotency);
+    run.deps.idempotency.setNx = async (key, ttlSeconds) => {
+      if (key.startsWith("m10:")) ttls.push(ttlSeconds);
+      return setNx(key, ttlSeconds);
+    };
+    await run.tenants.upsert(tenant());
+    const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(response.status).toBe(200);
+    expect(ttls).toEqual([expect.any(Number)]);
+    expect(ttls[0]).toBeGreaterThanOrEqual(360);
+    expect(await run.deps.idempotency.get("m10:loc_1:2026-06-22")).toBeNull();
+  });
+
+  it("finishes the other tenants when one invocation fails", async () => {
+    const run = harness();
+    await run.tenants.upsert(tenant());
+    await run.tenants.upsert(tenant({ locationId: "loc_2", name: "Second" }));
+    run.deps.invokeTenant = async (locationId) => {
+      if (locationId === "loc_2") throw new Error("tenant cron failed");
+      return {
+        tenants: 1,
+        contacts: 2,
+        written: 1,
+        skippedUnchanged: 0,
+        skippedInProgress: 0,
+        skippedNoOrders: 0,
+        skippedLock: 0,
+        enrolled: 0,
+        errors: 0,
+      };
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, tenants: 2, contacts: 2, written: 1, errors: 1 });
+      const failure = loggedEvents(errorSpy).find((line) => line.event === "m10.tenant_result");
+      expect(failure?.data).toMatchObject({
+        locationId: "loc_2",
+        status: "error",
+        message: "tenant cron failed",
+      });
+      expect(failure?.data.durationMs).toEqual(expect.any(Number));
+      const success = loggedEvents(logSpy).find((line) => line.event === "m10.tenant_result");
+      expect(success?.data).toMatchObject({ locationId: "loc_1", status: "ok" });
+      expect(success?.data.durationMs).toEqual(expect.any(Number));
+    } finally {
+      errorSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
+  it("returns 500 only when every tenant invocation fails", async () => {
+    const run = harness();
+    await run.tenants.upsert(tenant());
+    await run.tenants.upsert(tenant({ locationId: "loc_2", name: "Second" }));
+    run.deps.invokeTenant = async () => {
+      throw new Error("tenant cron failed");
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ ok: false, tenants: 2, errors: 2 });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("succeeds when the dispatcher has no active tenants", async () => {
+    const run = harness();
+    run.deps.invokeTenant = async () => {
+      throw new Error("should not run");
+    };
+    const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, tenants: 0, errors: 0 });
   });
 
   it("stores a contact cursor when the time budget is spent and resumes without the first page", async () => {

@@ -1,3 +1,4 @@
+import { scheduleTenantContinuation } from "../../src/cron/continue.js";
 import { handleM10Tenant } from "../../src/cron/m10.js";
 import { json } from "../../src/http/json.js";
 import { log } from "../../src/log/logger.js";
@@ -16,7 +17,7 @@ async function run(request: Request): Promise<Response> {
     const deps = createDefaultDeps();
     return await handleM10Tenant(request, {
       ...deps,
-      scheduleContinuation: (locationId) => scheduleTenant(request, locationId, deps.cronSecret),
+      scheduleContinuation: (locationId) => scheduleTenantContinuation(request, locationId, deps.cronSecret),
     });
   } catch (error) {
     log("error", "m10.misconfigured", {
@@ -24,17 +25,4 @@ async function run(request: Request): Promise<Response> {
     });
     return json({ error: "misconfigured" }, 500);
   }
-}
-
-function scheduleTenant(request: Request, locationId: string, secret: string | null): void {
-  const url = new URL(request.url);
-  url.pathname = "/api/cron/m10-tenant";
-  url.searchParams.set("locationId", locationId);
-  const work = fetch(url, {
-    method: "POST",
-    headers: { authorization: secret ? `Bearer ${secret}` : "" },
-  });
-  const waitUntil = (globalThis as { waitUntil?: (promise: Promise<unknown>) => void }).waitUntil;
-  if (typeof waitUntil === "function") waitUntil(work);
-  else void work;
 }

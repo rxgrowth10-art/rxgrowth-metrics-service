@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
-    "@upstash/redis": "^1.35.6"
+    "@upstash/redis": "^1.35.6",
+    "@vercel/functions": "^3.10.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
@@ -27,5 +28,8 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.0",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "zod": "4.6.7"
   }
 }
