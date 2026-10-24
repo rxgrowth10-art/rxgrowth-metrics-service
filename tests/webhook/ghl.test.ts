@@ -34,6 +34,7 @@ function deps(options?: {
   active?: boolean;
   fail?: boolean;
   detail?: ReturnType<typeof order> | null;
+  detailError?: Error;
   onFirstList?: () => Promise<void> | void;
 }) {
   const tenants = new MemoryTenantStore();
@@ -53,6 +54,7 @@ function deps(options?: {
     },
     async getOrder() {
       detailCalls += 1;
+      if (options?.detailError) throw options.detailError;
       return options?.detail === undefined ? null : options.detail;
     },
     async getContact() {
@@ -114,7 +116,8 @@ function postUrl(body: unknown, url: string, headers: Record<string, string> = {
 describe("GHL webhook", () => {
   it("recomputes a later nudge for the same contact and ignores payload values", async () => {
     const harness = deps({
-      orders: [order({ amount: 15, createdAt: "2026-01-11T00:00:00.000Z", sourceSubType: "Pickup" })],
+      orders: [order({ id: "order_nudge", amount: 15, createdAt: "2026-01-11T00:00:00.000Z", sourceSubType: "store" })],
+      detail: order({ id: "order_nudge", deliveryMethod: "shipping", markAsTest: false }),
     });
     await harness.tenants.upsert(tenant());
     const payload = {
@@ -135,6 +138,7 @@ describe("GHL webhook", () => {
     expect(Object.keys(harness.updates[0] ?? {})).toEqual([...M06_WRITTEN_KEYS]);
     expect(harness.updates[0]?.lifetime_value).toBe("15.00");
     expect(harness.updates[0]?.total_orders).toBe("1");
+    expect(harness.updates[0]?.last_order_type).toBe("Delivery");
     expect(harness.updates[0]?.winback_eligibility).toBeUndefined();
   });
 
@@ -241,7 +245,7 @@ describe("GHL webhook", () => {
     expect(harness.updates.at(-1)?.total_orders).toBe("2");
   });
 
-  it("fetches order detail only when paymentStatus or liveMode is missing", async () => {
+  it("fetches list detail only when paymentStatus or liveMode is missing, then the latest order once", async () => {
     const listed = order({
       id: "order_sample_1",
       amount: 93.5,
@@ -261,7 +265,7 @@ describe("GHL webhook", () => {
     await harness.tenants.upsert(tenant());
     const response = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
     expect(response.status).toBe(202);
-    expect(harness.detailCalls()).toBe(1);
+    expect(harness.detailCalls()).toBe(2);
     expect(harness.updates[0]?.total_orders).toBe("1");
     expect(harness.updates[0]?.lifetime_value).toBe("93.50");
     expect(harness.updates[0]?.last_order_type).toBeUndefined();
@@ -271,7 +275,28 @@ describe("GHL webhook", () => {
     });
     await complete.tenants.upsert(tenant());
     await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), complete.deps);
-    expect(complete.detailCalls()).toBe(0);
+    expect(complete.detailCalls()).toBe(1);
+  });
+
+  it("still accepts the nudge when the latest order detail returns 5xx", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const harness = deps({
+        orders: [order({ id: "order_down", amount: 15, createdAt: "2026-01-11T00:00:00.000Z", sourceSubType: "store" })],
+        detailError: new Error('status 500 {"contactSnapshot":{"email":"secret@example.test"}}'),
+      });
+      await harness.tenants.upsert(tenant());
+      const response = await handleGhlWebhook(post({ locationId: "loc_1", contactId: "contact_1" }), harness.deps);
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ accepted: true, written: true });
+      expect(harness.updates[0]?.total_orders).toBe("1");
+      expect(harness.updates[0]?.last_order_type).toBeUndefined();
+      const text = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(text).not.toContain("contactSnapshot");
+      expect(text).not.toContain("secret@example.test");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("queues while a lock is held and still dedupes an explicit event id", async () => {

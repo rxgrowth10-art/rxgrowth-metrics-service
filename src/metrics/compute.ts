@@ -41,7 +41,7 @@ export function computeM06(orders: readonly MetricOrder[], timeZone: string, now
     ...values,
     firstOrderDate,
     lastOrderDate,
-    lastOrderType: last?.sourceSubType ?? null,
+    lastOrderType: last?.deliveryMethod ?? null,
     lastOrderLocation: last?.sourceName ?? null,
     recencyDays: daysSinceLastOrder,
     recencyBucket: daysSinceLastOrder === null ? null : recencyBucket(daysSinceLastOrder),

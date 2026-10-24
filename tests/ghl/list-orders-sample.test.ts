@@ -32,7 +32,7 @@ describe("live list-orders shape", () => {
     expect(metrics.totalOrders).toBe(metrics.qualifyingOrderCount);
     expect(metrics.totalOrders).toBe(2);
     expect(metrics.lifetimeValue).toBe(133.5);
-    expect(metrics.lastOrderType).toBe("store");
+    expect(metrics.lastOrderType).toBeNull();
     expect(coerceLastOrderType(metrics.lastOrderType)).toBe("");
   });
 });

@@ -79,6 +79,7 @@ function parseOrder(value: unknown): GhlOrder | null {
     amount: typeof record.amount === "number" || typeof record.amount === "string" ? record.amount : null,
     sourceName: asString(record.sourceName),
     sourceSubType: asString(record.sourceSubType),
+    deliveryMethod: readDeliveryMethod(record),
     createdAt: asTimestamp(record.createdAt),
     updatedAt: asTimestamp(record.updatedAt),
     currency: asString(record.currency),
@@ -132,6 +133,12 @@ function readSearchAfter(body: unknown): unknown[] | null {
     return (meta as Record<string, unknown>).searchAfter as unknown[];
   }
   return null;
+}
+
+function readDeliveryMethod(record: Record<string, unknown>): string | null {
+  const delivery = record.delivery;
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) return null;
+  return asString((delivery as Record<string, unknown>).method);
 }
 
 function asString(value: unknown): string | null {

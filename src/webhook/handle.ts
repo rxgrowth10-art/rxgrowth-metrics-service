@@ -1,5 +1,6 @@
 import type { GhlClient } from "../ghl";
 import { hydrateOrders } from "../ghl/hydrate-orders";
+import { applyLatestOrderDetail } from "../ghl/latest-order-detail";
 import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token";
 import { json } from "../http/json";
 import type { IdempotencyStore } from "../idempotency";
@@ -114,7 +115,8 @@ async function compute(
   const apiKey = decryptApiKey(tenant.apiKeyEncrypted, deps.encryptionKey);
   const client = deps.ghlFactory({ apiKey, locationId: tenant.locationId });
   const listed = await client.listOrders(ids.contactId);
-  const orders = await hydrateOrders(listed, (orderId) => client.getOrder(orderId));
+  const hydrated = await hydrateOrders(listed, (orderId) => client.getOrder(orderId));
+  const orders = await applyLatestOrderDetail(hydrated, (orderId) => client.getOrder(orderId));
   return writeM06Metrics({
     client,
     contactId: ids.contactId,

@@ -9,6 +9,7 @@ export interface MetricOrder {
   amount?: number | string | null;
   sourceName?: string | null;
   sourceSubType?: string | null;
+  deliveryMethod?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 }

@@ -31,23 +31,18 @@ export function formatM06Values(metrics: CustomerMetrics): Record<string, string
   };
 }
 
+/** Checkout `delivery.method` only. Shipping fees and payment names are not a type. */
 export function coerceLastOrderType(value: string | null): string {
   if (!value || !value.trim()) return "";
-  const normalized = value.trim().toLowerCase();
-  const options = fieldByKey("last_order_type")?.picklistOptions ?? [];
-  const direct = options.find((option) => option.toLowerCase() === normalized);
-  if (direct) return direct;
-  const alias = LAST_ORDER_TYPE_ALIASES[normalized];
+  const alias = CHECKOUT_METHOD[value.trim().toLowerCase()];
   if (!alias) return "";
+  const options = fieldByKey("last_order_type")?.picklistOptions ?? [];
   return options.find((option) => option.toLowerCase() === alias.toLowerCase()) ?? "";
 }
 
-const LAST_ORDER_TYPE_ALIASES: Record<string, string> = {
-  delivery: "Delivery",
+const CHECKOUT_METHOD: Record<string, string> = {
+  shipping: "Delivery",
   pickup: "Pickup",
-  "dine-in": "Dine-in",
-  dine_in: "Dine-in",
-  dinein: "Dine-in",
 };
 
 function decimal(value: number | null): string {

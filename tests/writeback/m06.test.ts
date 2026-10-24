@@ -14,7 +14,7 @@ function fieldCatalog() {
   });
 }
 
-function clientWith(orders = [order({ amount: 25.5, sourceSubType: "delivery" })]) {
+function clientWith(orders = [order({ amount: 25.5, deliveryMethod: "shipping" })]) {
   const updates: CustomFieldWrite[][] = [];
   let storedHash: string | null = null;
   const hashId = fieldByKey("metrics_hash")?.testLabId ?? "hash";
@@ -56,7 +56,7 @@ describe("M06 writeback", () => {
     const result = await writeM06Metrics({
       client,
       contactId: "contact_1",
-      orders: [order({ amount: 25.5, sourceSubType: "delivery", createdAt: "2026-01-01T12:00:00.000Z" })],
+      orders: [order({ amount: 25.5, deliveryMethod: "shipping", createdAt: "2026-01-01T12:00:00.000Z" })],
       timeZone: "UTC",
       now: NOW,
     });
@@ -149,10 +149,10 @@ describe("M06 writeback", () => {
     expect(noneValue("lifecycle_stage")).toBe("NO QUALIFYING ORDERS");
   });
 
-  it("omits last_order_type unless sourceSubType maps to the picklist", async () => {
-    expect(coerceLastOrderType("PICKUP")).toBe("Pickup");
-    expect(coerceLastOrderType("dine_in")).toBe("Dine-in");
-    expect(coerceLastOrderType("dinein")).toBe("Dine-in");
+  it("writes last_order_type only for checkout shipping or pickup", async () => {
+    expect(coerceLastOrderType("shipping")).toBe("Delivery");
+    expect(coerceLastOrderType("pickup")).toBe("Pickup");
+    expect(coerceLastOrderType("dine_in")).toBe("");
     expect(coerceLastOrderType("store")).toBe("");
     expect(coerceLastOrderType("  ")).toBe("");
 
@@ -160,23 +160,26 @@ describe("M06 writeback", () => {
     await writeM06Metrics({
       client: unmapped.client,
       contactId: "contact_1",
-      orders: [order({ sourceSubType: "store", createdAt: "2026-01-01T12:00:00.000Z" })],
+      orders: [order({ sourceSubType: "store", deliveryMethod: null, createdAt: "2026-01-01T12:00:00.000Z" })],
       timeZone: "UTC",
       now: NOW,
     });
     const fields = unmapped.updates[0] ?? [];
     expect(fields.map((field) => field.key)).toEqual(M06_WRITTEN_KEYS.filter((key) => key !== "last_order_type"));
     expect(fields.some((field) => field.key === "last_order_type")).toBe(false);
+    expect(fields.find((field) => field.key === "metrics_hash")?.value).toBe(
+      metricsHash({ ...Object.fromEntries(fields.map((field) => [field.key, field.value])), last_order_type: "" }),
+    );
 
     const mapped = clientWith();
     await writeM06Metrics({
       client: mapped.client,
       contactId: "contact_1",
-      orders: [order({ sourceSubType: "DINE-IN", createdAt: "2026-01-01T12:00:00.000Z" })],
+      orders: [order({ deliveryMethod: "pickup", createdAt: "2026-01-01T12:00:00.000Z" })],
       timeZone: "UTC",
       now: NOW,
     });
-    expect(mapped.updates[0]?.find((field) => field.key === "last_order_type")?.value).toBe("Dine-in");
+    expect(mapped.updates[0]?.find((field) => field.key === "last_order_type")?.value).toBe("Pickup");
   });
 
   it("hashes the written values independent of key order and ignores the timestamp", () => {
