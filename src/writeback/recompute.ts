@@ -1,9 +1,11 @@
-import type { GhlClient } from "../ghl/index.js";
-import { hydrateOrders } from "../ghl/hydrate-orders.js";
+import type { GhlClient, GhlOrder } from "../ghl/index.js";
+import { ORDER_DETAIL_CONCURRENCY, hydrateOrders } from "../ghl/hydrate-orders.js";
 import { applyLatestOrderDetail } from "../ghl/latest-order-detail.js";
+import type { OrderSummaryCache } from "../ghl/order-summary-cache.js";
+import { WEBHOOK_DETAIL_FETCH_LIMIT, resolveOrderSummaries } from "../ghl/resolve-order-summaries.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
 import { log } from "../log/logger.js";
-import { computeM06 } from "../metrics/index.js";
+import { computeM06, contactOrderSummaries, type OrderDetailSummary } from "../metrics/index.js";
 import { formatM06Values } from "./format.js";
 import { writeM06Metrics } from "./m06.js";
 
@@ -21,6 +23,20 @@ export function contactRerunKey(locationId: string, contactId: string): string {
 export interface M06RecomputeResult {
   written: boolean;
   values: Record<string, string>;
+  /** Orders for this contact, each carrying `detailSummary` when the cache resolved it. */
+  orders: GhlOrder[];
+  /** Aligned with `orders`. Null where the detail summary is missing. */
+  summaries: Array<OrderDetailSummary | null>;
+  /** True when item-derived fields should keep the contact's previous values. */
+  incomplete: boolean;
+}
+
+export interface OrderSummaryPass {
+  orderSummaries?: OrderSummaryCache;
+  /** Extra detail reads for cache misses. Defaults to the webhook cap of 2. */
+  summaryFetchLimit?: number;
+  /** Reconcile sets this from the hop budget so a long warm can continue later. */
+  shouldStop?: () => boolean;
 }
 
 export async function recomputeM06Contact(args: {
@@ -30,10 +46,37 @@ export async function recomputeM06Contact(args: {
   timeZone: string;
   now: Date;
   idempotency: IdempotencyStore;
-}): Promise<M06RecomputeResult> {
+} & OrderSummaryPass): Promise<M06RecomputeResult> {
+  const known = new Map<string, GhlOrder>();
+  const attempted = new Set<string>();
+  const loadDetail = async (orderId: string): Promise<GhlOrder | null> => {
+    attempted.add(orderId);
+    const detail = await args.client.getOrder(orderId);
+    if (detail) known.set(orderId, detail.id ? detail : { ...detail, id: orderId });
+    return detail;
+  };
   const listed = await args.client.listOrders(args.contactId);
-  const hydrated = await hydrateOrders(listed, (orderId) => args.client.getOrder(orderId));
-  const orders = await applyLatestOrderDetail(hydrated, (orderId) => args.client.getOrder(orderId));
+  const hydrated = await hydrateOrders(listed, loadDetail, ORDER_DETAIL_CONCURRENCY);
+  const detailed = await applyLatestOrderDetail(hydrated, loadDetail);
+  let orders = detailed;
+  let summaries = contactOrderSummaries(detailed);
+  let incomplete = false;
+  if (args.orderSummaries) {
+    const resolved = await resolveOrderSummaries({
+      locationId: args.locationId,
+      contactId: args.contactId,
+      orders: detailed,
+      cache: args.orderSummaries,
+      getOrder: loadDetail,
+      knownDetails: known,
+      attemptedIds: attempted,
+      maxFetches: args.summaryFetchLimit ?? WEBHOOK_DETAIL_FETCH_LIMIT,
+      ...(args.shouldStop ? { shouldStop: args.shouldStop } : {}),
+    });
+    orders = resolved.orders;
+    summaries = resolved.summaries;
+    incomplete = resolved.incomplete;
+  }
   const values = formatM06Values(computeM06(orders, args.timeZone, args.now));
   const result = await writeM06Metrics({
     client: args.client,
@@ -43,7 +86,7 @@ export async function recomputeM06Contact(args: {
     now: args.now,
     fieldCache: { store: args.idempotency, locationId: args.locationId },
   });
-  return { written: result.written, values };
+  return { written: result.written, values, orders, summaries, incomplete };
 }
 
 /**
@@ -57,7 +100,11 @@ export async function runLockedM06(args: {
   timeZone: string;
   now: Date;
   idempotency: IdempotencyStore;
-}): Promise<{ status: "locked" | "written" | "unchanged" | "failed"; values?: Record<string, string> }> {
+} & OrderSummaryPass): Promise<{
+  status: "locked" | "written" | "unchanged" | "failed";
+  values?: Record<string, string>;
+  incomplete?: boolean;
+}> {
   const lockKey = contactLockKey(args.locationId, args.contactId);
   const rerunKey = contactRerunKey(args.locationId, args.contactId);
   if (!(await args.idempotency.setNx(lockKey, CONTACT_LOCK_TTL_SECONDS))) {
@@ -65,10 +112,12 @@ export async function runLockedM06(args: {
     log("info", "m06.reconcile_locked", { locationId: args.locationId, contactId: args.contactId });
     return { status: "locked" };
   }
-  let outcome: { status: "written" | "unchanged" | "failed"; values?: Record<string, string> } = { status: "failed" };
+  let outcome: { status: "written" | "unchanged" | "failed"; values?: Record<string, string>; incomplete?: boolean } = {
+    status: "failed",
+  };
   try {
     const result = await recomputeM06Contact(args);
-    outcome = { status: result.written ? "written" : "unchanged", values: result.values };
+    outcome = { status: result.written ? "written" : "unchanged", values: result.values, incomplete: result.incomplete };
   } catch (error) {
     log("error", "m06.reconcile_failed", {
       locationId: args.locationId,
@@ -82,7 +131,7 @@ export async function runLockedM06(args: {
       try {
         await args.idempotency.del(rerunKey);
         const again = await recomputeM06Contact(args);
-        outcome = { status: again.written ? "written" : "unchanged", values: again.values };
+        outcome = { status: again.written ? "written" : "unchanged", values: again.values, incomplete: again.incomplete };
       } catch (error) {
         log("error", "m06.reconcile_failed", {
           locationId: args.locationId,

@@ -1,3 +1,29 @@
+/** One line from an order detail. No customer fields. */
+export interface OrderLine {
+  productId: string | null;
+  name: string | null;
+  qty: number | null;
+  /** `price.amount × qty`. Null when either side is missing. */
+  spend: number | null;
+  collectionIds: readonly string[];
+}
+
+/**
+ * Compact order-detail summary stored in Upstash. The allowlist is the whole
+ * value: contact id, contactSnapshot, and any other customer field stay out.
+ */
+export interface OrderDetailSummary {
+  orderId: string;
+  updatedAt: string | null;
+  items: readonly OrderLine[];
+  deliveryMethod: string | null;
+  sourceType: string | null;
+  sourceSubType: string | null;
+  sourceName: string | null;
+  couponCode: string | null;
+  branchName: string | null;
+}
+
 export interface MetricOrder {
   id?: string | null;
   contactId?: string | null;
@@ -9,10 +35,15 @@ export interface MetricOrder {
   amount?: number | string | null;
   sourceName?: string | null;
   sourceSubType?: string | null;
+  sourceType?: string | null;
   deliveryMethod?: string | null;
   branchName?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  items?: readonly OrderLine[];
+  couponCode?: string | null;
+  /** Present after the summary cache resolves. Metrics do not read it. */
+  detailSummary?: OrderDetailSummary | null;
 }
 
 export type Trend = "Increasing" | "Decreasing" | "Stable" | "Insufficient Data";

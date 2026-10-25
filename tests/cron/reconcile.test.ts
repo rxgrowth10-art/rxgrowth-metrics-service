@@ -9,6 +9,8 @@ import {
   readReconcileMaxPages,
 } from "../../src/cron/reconcile.js";
 import type { CustomFieldWrite, GhlClient, GhlContact, GhlOrder, GhlOrderPage } from "../../src/ghl/index.js";
+import { MemoryOrderSummaryCache, type OrderSummaryCache } from "../../src/ghl/order-summary-cache.js";
+import { orderBackfillKey, orderSummaryKey, parseStoredSummary } from "../../src/ghl/order-summary.js";
 import { parseOrderPage } from "../../src/ghl/parse.js";
 import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
 import { computeM06 } from "../../src/metrics/index.js";
@@ -71,6 +73,7 @@ function harness(options?: {
   cursorSeenCap?: number;
   now?: Date;
   timezone?: string;
+  orderSummaries?: OrderSummaryCache;
 }) {
   const tenants = new MemoryTenantStore();
   const listed: string[] = [];
@@ -122,6 +125,7 @@ function harness(options?: {
   const deps: M10Deps = {
     tenants,
     idempotency: new MemoryIdempotencyStore(() => NOW.getTime()),
+    ...(options?.orderSummaries ? { orderSummaries: options.orderSummaries } : {}),
     encryptionKey: KEY,
     cronSecret: "cron-secret",
     enrollEnabled: false,
@@ -597,6 +601,81 @@ describe("M06 order reconcile", () => {
       });
     } finally {
       warn.mockRestore();
+    }
+  });
+
+  it("drains the order-summary backfill set into the cache", async () => {
+    const cache = new MemoryOrderSummaryCache(() => NOW.getTime());
+    await cache.sadd(orderBackfillKey("loc_1"), "contact_backfill");
+    const updated = ["2026-06-01T00:00:00.000Z", "2026-06-02T00:00:00.000Z", "2026-06-03T00:00:00.000Z"];
+    await run({
+      orderSummaries: cache,
+      pages: () => ({ orders: [], totalCount: 0 }),
+      contactOrders: (contactId) =>
+        updated.map((updatedAt, index) =>
+          order({
+            id: `bf_${index}`,
+            contactId,
+            amount: 10 + index,
+            createdAt: updatedAt,
+            updatedAt,
+          }),
+        ),
+    });
+    expect(await cache.smembers(orderBackfillKey("loc_1"))).toEqual([]);
+    for (const [index, updatedAt] of updated.entries()) {
+      const raw = await cache.mget([orderSummaryKey("loc_1", `bf_${index}`, updatedAt)]);
+      expect(parseStoredSummary(raw[0], `bf_${index}`, updatedAt)).toMatchObject({ orderId: `bf_${index}` });
+    }
+  });
+
+  it("leaves a backfill contact queued when the hop budget is already spent", async () => {
+    const cache = new MemoryOrderSummaryCache(() => NOW.getTime());
+    await cache.sadd(orderBackfillKey("loc_1"), "contact_backfill");
+    const { listed, result } = await run({
+      orderSummaries: cache,
+      budgetMs: 0,
+      pages: () => ({ orders: [], totalCount: 0 }),
+      contactOrders: () => [order({ id: "bf_0", amount: 10, updatedAt: IN_WINDOW, createdAt: IN_WINDOW })],
+    });
+    expect(result.continue).toBe(true);
+    expect(listed).toEqual([]);
+    expect(await cache.smembers(orderBackfillKey("loc_1"))).toEqual(["contact_backfill"]);
+  });
+
+  it("warms every order summary on the weekly full reconcile", async () => {
+    const cache = new MemoryOrderSummaryCache(() => new Date("2026-06-26T12:00:00.000Z").getTime());
+    const updated = ["2026-01-01T00:00:00.000Z", "2026-02-01T00:00:00.000Z", "2026-03-01T00:00:00.000Z"];
+    await run({
+      orderSummaries: cache,
+      now: new Date("2026-06-26T12:00:00.000Z"),
+      pages: () => ({
+        orders: [
+          order({
+            id: "page_warm",
+            contactId: "contact_warm",
+            amount: 10,
+            createdAt: "2025-01-01T00:00:00.000Z",
+            updatedAt: "2025-01-01T00:00:00.000Z",
+          }),
+        ],
+        totalCount: 1,
+      }),
+      contactOrders: (contactId) =>
+        updated.map((updatedAt, index) =>
+          order({
+            id: `warm_${index}`,
+            contactId,
+            amount: 10 + index,
+            createdAt: updatedAt,
+            updatedAt,
+          }),
+        ),
+    });
+    expect(await cache.smembers(orderBackfillKey("loc_1"))).toEqual([]);
+    for (const [index, updatedAt] of updated.entries()) {
+      const raw = await cache.mget([orderSummaryKey("loc_1", `warm_${index}`, updatedAt)]);
+      expect(raw[0]).toEqual(expect.any(String));
     }
   });
 });
