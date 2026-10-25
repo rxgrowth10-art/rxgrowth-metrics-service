@@ -1,5 +1,6 @@
 import { addCalendarDays, businessDateString, calendarDayDifference } from "../time/business-date.js";
 import { frequencyBucket, trailing12MonthOrderCount } from "./frequency.js";
+import { resolveLastOrderLocation } from "./location.js";
 import { averageIntervalDays, orderIntervalsDays, typicalIntervalDays } from "./intervals.js";
 import { customerStatus, customerType, lifecycleStage } from "./lifecycle.js";
 import { summarizeValue } from "./ltv.js";
@@ -42,7 +43,7 @@ export function computeM06(orders: readonly MetricOrder[], timeZone: string, now
     firstOrderDate,
     lastOrderDate,
     lastOrderType: last?.deliveryMethod ?? null,
-    lastOrderLocation: last?.sourceName ?? null,
+    lastOrderLocation: resolveLastOrderLocation(last),
     recencyDays: daysSinceLastOrder,
     recencyBucket: daysSinceLastOrder === null ? null : recencyBucket(daysSinceLastOrder),
     trailing12MonthOrderCount: trailing,

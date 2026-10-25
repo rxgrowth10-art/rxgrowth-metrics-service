@@ -10,6 +10,7 @@ export interface MetricOrder {
   sourceName?: string | null;
   sourceSubType?: string | null;
   deliveryMethod?: string | null;
+  branchName?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 }

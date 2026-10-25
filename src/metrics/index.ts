@@ -1,6 +1,7 @@
 export { computeM06 } from "./compute.js";
 export { frequencyBucket, trailing12MonthOrderCount } from "./frequency.js";
 export { averageIntervalDays, orderIntervalsDays, typicalIntervalDays } from "./intervals.js";
+export { resolveLastOrderLocation } from "./location.js";
 export { customerStatus, customerType, lifecycleStage } from "./lifecycle.js";
 export { summarizeValue } from "./ltv.js";
 export { isQualifyingOrder } from "./qualifying.js";

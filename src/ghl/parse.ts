@@ -1,3 +1,4 @@
+import { readBranchName, readSourceName } from "../metrics/location.js";
 import type { GhlContact, GhlContactField, GhlCustomField, GhlOrder } from "./types.js";
 
 export interface ParsedOrderPage {
@@ -77,9 +78,10 @@ function parseOrder(value: unknown): GhlOrder | null {
     liveMode: typeof record.liveMode === "boolean" ? record.liveMode : null,
     markAsTest: typeof record.markAsTest === "boolean" ? record.markAsTest : null,
     amount: typeof record.amount === "number" || typeof record.amount === "string" ? record.amount : null,
-    sourceName: asString(record.sourceName),
+    sourceName: readSourceName(record),
     sourceSubType: asString(record.sourceSubType),
     deliveryMethod: readDeliveryMethod(record),
+    branchName: readBranchName(record),
     createdAt: asTimestamp(record.createdAt),
     updatedAt: asTimestamp(record.updatedAt),
     currency: asString(record.currency),
