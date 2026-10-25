@@ -188,6 +188,20 @@ describe("M06 writeback", () => {
     expect(mapped.updates[0]?.find((field) => field.key === "last_order_type")?.value).toBe("Pickup");
   });
 
+  it("writes an empty last_order_location when the order has no branch and no source name", async () => {
+    const none = clientWith();
+    await writeM06Metrics({
+      client: none.client,
+      contactId: "contact_1",
+      orders: [order({ sourceName: null, branchName: null, deliveryMethod: null, createdAt: "2026-01-01T12:00:00.000Z" })],
+      timeZone: "UTC",
+      now: NOW,
+    });
+    const fields = none.updates[0] ?? [];
+    expect(fields.some((field) => field.key === "last_order_location")).toBe(true);
+    expect(fields.find((field) => field.key === "last_order_location")?.value).toBe("");
+  });
+
   it("hashes the written values independent of key order and ignores the timestamp", () => {
     const left = metricsHash({ b: "2", a: "1", m06_intelligence_updated_at: "2026-01-01" });
     const right = metricsHash({ a: "1", b: "2", m06_intelligence_updated_at: "2026-02-02" });

@@ -13,6 +13,7 @@ export function order(overrides: Partial<GhlOrder> = {}): GhlOrder {
     sourceName: "Counter",
     sourceSubType: "Pickup",
     deliveryMethod: null,
+    branchName: null,
     createdAt: "2026-01-01T12:00:00.000Z",
     updatedAt: null,
     currency: null,

@@ -11,6 +11,8 @@ export interface GhlOrder {
   sourceSubType: string | null;
   /** Checkout choice from order detail `delivery.method`. Absent on the list payload. */
   deliveryMethod: string | null;
+  /** Branch name from the order detail. Null when the detail has no branch field. */
+  branchName: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   currency: string | null;

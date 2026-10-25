@@ -6,11 +6,12 @@ import type { GhlOrder } from "./types.js";
 export const MAX_LATEST_ORDER_DETAIL_CALLS = 3;
 
 /**
- * After the list is filtered to qualifying orders, read checkout choice from
- * the latest order's detail. `delivery.method` of `shipping` or `pickup` is
- * stored on that order. A detail `markAsTest: true` drops that order and tries
- * the next latest, up to three calls. A failed detail omits the type and does
- * not fail the event. The detail body is never logged: it contains contactSnapshot.
+ * After the list is filtered to qualifying orders, read checkout choice and
+ * branch from the latest order's detail. `delivery.method` of `shipping` or
+ * `pickup` is stored on that order, and so is the branch name when the detail
+ * has one. A detail `markAsTest: true` drops that order and tries the next
+ * latest, up to three calls. A failed detail omits the type and does not fail
+ * the event. The detail body is never logged: it contains contactSnapshot.
  */
 export async function applyLatestOrderDetail(
   orders: readonly GhlOrder[],
@@ -46,6 +47,7 @@ export async function applyLatestOrderDetail(
       continue;
     }
     order.deliveryMethod = detail.deliveryMethod;
+    order.branchName = detail.branchName;
     break;
   }
   return next;

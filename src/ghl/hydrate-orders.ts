@@ -60,6 +60,7 @@ function mergeOrder(listed: GhlOrder, detail: GhlOrder): GhlOrder {
     sourceName: detail.sourceName ?? listed.sourceName,
     sourceSubType: detail.sourceSubType ?? listed.sourceSubType,
     deliveryMethod: detail.deliveryMethod ?? listed.deliveryMethod,
+    branchName: detail.branchName ?? listed.branchName,
     createdAt: detail.createdAt ?? listed.createdAt,
     updatedAt: detail.updatedAt ?? listed.updatedAt,
     currency: detail.currency ?? listed.currency,
