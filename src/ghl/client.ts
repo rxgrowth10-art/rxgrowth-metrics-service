@@ -170,7 +170,7 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
       if (!reachedEnd) {
         throw new GhlRequestError("Order pagination exceeded the page cap", 0, "/payments/orders");
       }
-      return orders.filter((order) => order.contactId === null || order.contactId === contactId);
+      return orders.filter((order) => order.contactId === contactId);
     },
 
     async listLocationOrdersPage(offset: number): Promise<GhlOrderPage> {

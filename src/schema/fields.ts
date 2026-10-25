@@ -50,7 +50,7 @@ export const FIELDS: readonly FieldDefinition[] = [
   { key: "do_not_contact_reason", fieldKey: "contact.do_not_contact_reason", name: "Do Not Contact Reason", dataType: "SINGLE_OPTIONS", testLabId: "pvN01LGFUM8C2QywrTZW", writer: "external", picklistOptions: ["Customer Request", "Opted Out", "Complaint", "Invalid Contact", "Other"] },
   { key: "email_marketing_optin", fieldKey: "contact.email_marketing_optin", name: "Email Marketing Opt-In", dataType: "SINGLE_OPTIONS", testLabId: "7c8pglF9uU6Yx1Klh2Qh", writer: "external", picklistOptions: ["Opted In", "Not Opted In"] },
   { key: "expected_next_order_date", fieldKey: "contact.expected_next_order_date", name: "Expected Next Order Date", dataType: "DATE", testLabId: "ddj51NNBGOXHvfrgC0lR", writer: "m06" },
-  { key: "favorite_category", fieldKey: "contact.favorite_category", name: "Favorite Category", dataType: "SINGLE_OPTIONS", testLabId: "iXnVu88kcqYEFMUXS6aO", writer: "external", picklistOptions: ["Sushi", "Sashimi", "Rolls", "Appetizers"] },
+  { key: "favorite_category", fieldKey: "contact.favorite_category", name: "Favorite Category", dataType: "TEXT", testLabId: "176K49TuVhm0OO23cyvU", writer: "external" },
   { key: "favorite_item", fieldKey: "contact.favorite_item", name: "Favorite Item", dataType: "TEXT", testLabId: "VIdTmboEkxEgeDGvPVZn", writer: "external" },
   { key: "feedback_status", fieldKey: "contact.feedback_status", name: "Feedback Status", dataType: "SINGLE_OPTIONS", testLabId: "VWdQjoAZlkSs4hYarSUq", writer: "external", picklistOptions: ["No Feedback", "Positive", "Neutral", "Negative", "Escalated", "Resolved"] },
   { key: "first_order_date", fieldKey: "contact.first_order_date", name: "First Order Date", dataType: "DATE", testLabId: "UmAdoduRcEp3Ck1KrBdv", writer: "m06" },
