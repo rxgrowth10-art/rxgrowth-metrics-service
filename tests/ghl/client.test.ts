@@ -48,6 +48,7 @@ describe("GHL client", () => {
           data: [
             {
               id: "o1",
+              contactId: "contact_1",
               amount: 10,
               liveMode: true,
               markAsTest: false,
@@ -99,13 +100,19 @@ describe("GHL client", () => {
         if (offset === 0) {
           return jsonResponse({
             data: [
-              { _id: "o1", amount: 1 },
-              { _id: "o2", amount: 2 },
+              { _id: "o1", contactId: "contact_1", amount: 1 },
+              { _id: "o2", contactId: "contact_1", amount: 2 },
             ],
             totalCount: 3,
           });
         }
-        return jsonResponse({ data: [{ _id: "o3", amount: 3 }, { _id: "o2", amount: 2 }], totalCount: 3 });
+        return jsonResponse({
+          data: [
+            { _id: "o3", contactId: "contact_1", amount: 3 },
+            { _id: "o2", contactId: "contact_1", amount: 2 },
+          ],
+          totalCount: 3,
+        });
       },
     });
 
@@ -172,8 +179,8 @@ describe("GHL client", () => {
       pageSize: 1,
       fetchImpl: async (input) => {
         const offset = Number(new URL(String(input)).searchParams.get("offset"));
-        if (offset === 0) return jsonResponse({ data: [{ id: "o1" }], totalCount: 2 });
-        return jsonResponse({ data: [{ id: "o2" }], totalCount: 2 });
+        if (offset === 0) return jsonResponse({ data: [{ id: "o1", contactId: "contact_1" }], totalCount: 2 });
+        return jsonResponse({ data: [{ id: "o2", contactId: "contact_1" }], totalCount: 2 });
       },
     });
     const orders = await client.listOrders("contact_1");
@@ -305,7 +312,7 @@ describe("GHL client", () => {
     expect(clock.sleeps).toEqual([]);
   });
 
-  it("drops orders for a different contact and loads one order with altId", async () => {
+  it("drops orders for another contact or with no contactId and loads one order with altId", async () => {
     const clock = fakeClock();
     const urls: string[] = [];
     const client = createGhlClient({
@@ -330,8 +337,9 @@ describe("GHL client", () => {
           data: [
             { _id: "keep", contactId: "contact_1", amount: 10, paymentStatus: "paid", liveMode: true },
             { _id: "drop", contactId: "someone_else", amount: 99, paymentStatus: "paid", liveMode: true },
+            { _id: "orphan", contactId: null, amount: 50, paymentStatus: "paid", liveMode: true },
           ],
-          totalCount: 2,
+          totalCount: 3,
         });
       },
     });

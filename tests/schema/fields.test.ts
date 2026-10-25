@@ -58,8 +58,56 @@ describe("generated field contract", () => {
     }
     expect(M06_WRITTEN_KEYS).not.toContain("winback_eligibility");
     expect(M06_WRITTEN_KEYS).not.toContain("winback_tier");
+    expect(fieldByKey("last_coupon_code")).toMatchObject({
+      writer: "external",
+      dataType: "TEXT",
+      testLabId: "2VAJ1dipwBArGbM5GUX0",
+    });
     expect(M10_WRITTEN_KEYS).toEqual(["winback_eligibility", "winback_tier"]);
     expect(WORKFLOW_OWNED_KEYS).toEqual(["winback_cycle_status", "winback_cycle_started_at"]);
     expect(M06_HASH_EXCLUDED_KEYS).toEqual(["metrics_hash", "m06_intelligence_updated_at"]);
+  });
+
+  it("keeps favorite_category as free text with no picklist", () => {
+    const field = fieldByKey("favorite_category");
+    expect(field).toMatchObject({
+      fieldKey: "contact.favorite_category",
+      dataType: "TEXT",
+      testLabId: "176K49TuVhm0OO23cyvU",
+      writer: "external",
+    });
+    expect(field?.picklistOptions).toBeUndefined();
+  });
+
+  it("pins the current M06 written keys", () => {
+    expect([...M06_WRITTEN_KEYS]).toEqual([
+      "total_orders",
+      "qualifying_order_count",
+      "first_order_date",
+      "last_order_date",
+      "lifetime_value",
+      "average_order_value",
+      "highest_order_value",
+      "lowest_order_value",
+      "customer_type",
+      "customer_status",
+      "lifecycle_stage",
+      "last_order_location",
+      "last_order_type",
+      "average_order_interval_days",
+      "typical_order_interval_days",
+      "orders_last_30_days",
+      "orders_previous_30_days",
+      "spend_last_30_days",
+      "spend_previous_30_days",
+      "order_frequency_trend",
+      "spending_trend",
+      "days_since_last_order",
+      "expected_next_order_date",
+      "days_overdue",
+      "overdue_ratio",
+      "metrics_hash",
+      "m06_intelligence_updated_at",
+    ]);
   });
 });
