@@ -28,6 +28,13 @@ export function formatM06Values(metrics: CustomerMetrics): Record<string, string
     expected_next_order_date: text(metrics.expectedNextOrderDate),
     days_overdue: decimal(metrics.daysOverdue),
     overdue_ratio: decimal(metrics.overdueRatio),
+    favorite_item: text(metrics.favoriteItem),
+    top_items: text(metrics.topItems),
+    preferred_order_type: coerceLastOrderType(metrics.preferredOrderType),
+    preferred_location: text(metrics.preferredLocation),
+    purchase_consistency: picklist("purchase_consistency", metrics.purchaseConsistency),
+    order_source_mix: text(metrics.orderSourceMix),
+    primary_order_source: picklist("primary_order_source", metrics.primaryOrderSource),
   };
 }
 
@@ -44,6 +51,12 @@ const CHECKOUT_METHOD: Record<string, string> = {
   shipping: "Delivery",
   pickup: "Pickup",
 };
+
+function picklist(key: string, value: string | null): string {
+  if (!value) return "";
+  const options = fieldByKey(key)?.picklistOptions ?? [];
+  return options.find((option) => option === value) ?? "";
+}
 
 function decimal(value: number | null): string {
   return value === null ? "" : value.toFixed(2);

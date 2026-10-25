@@ -1,6 +1,11 @@
+export { classifyOrderSource, orderCheckoutMethod, orderLocationName, rankChannels } from "./channels.js";
+export type { ChannelRanking } from "./channels.js";
 export { computeM06 } from "./compute.js";
+export { purchaseConsistencyLabel } from "./consistency.js";
 export { frequencyBucket, trailing12MonthOrderCount } from "./frequency.js";
 export { averageIntervalDays, orderIntervalsDays, typicalIntervalDays } from "./intervals.js";
+export { orderLines, rankFavoriteItems } from "./items.js";
+export type { ItemRanking } from "./items.js";
 export { resolveLastOrderLocation } from "./location.js";
 export { contactOrderSummaries, viewContactOrders } from "./order-summaries.js";
 export type { ContactOrderView } from "./order-summaries.js";

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT } from "../../api/webhooks/ghl.js";
 import type { GhlClient } from "../../src/ghl/index.js";
 import { MemoryOrderSummaryCache } from "../../src/ghl/order-summary-cache.js";
+import { orderBackfillKey } from "../../src/ghl/order-summary.js";
 import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
 import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
 import { hashWebhookToken } from "../../src/http/webhook-token.js";
@@ -151,6 +152,59 @@ describe("GHL webhook", () => {
     expect(harness.updates[0]?.total_orders).toBe("1");
     expect(harness.updates[0]?.last_order_type).toBe("Delivery");
     expect(harness.updates[0]?.winback_eligibility).toBeUndefined();
+  });
+
+  it("keeps detail fields off an incomplete pass and writes them when the summaries catch up", async () => {
+    const line = { productId: "prod_1", name: "Koshari", qty: 2, spend: 40, collectionIds: [] as string[] };
+    const orders = [1, 2, 3, 4].map((index) =>
+      order({
+        id: `o${index}`,
+        amount: 10 * index,
+        createdAt: `2026-06-0${index}T00:00:00.000Z`,
+        updatedAt: `2026-06-0${index}T00:00:00.000Z`,
+        sourceName: "STENZ STORE",
+        sourceType: "website",
+        sourceSubType: "store",
+      }),
+    );
+    const harness = deps({
+      orders,
+      detail: order({
+        deliveryMethod: "shipping",
+        items: [line],
+        markAsTest: false,
+        sourceName: "STENZ STORE",
+        sourceType: "website",
+        sourceSubType: "store",
+        branchName: null,
+      }),
+    });
+    await harness.tenants.upsert(tenant());
+    const first = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
+    expect(await first.json()).toEqual({ accepted: true, written: true });
+    expect(harness.updates[0]?.favorite_item).toBeUndefined();
+    expect(harness.updates[0]?.top_items).toBeUndefined();
+    expect(harness.updates[0]?.preferred_order_type).toBeUndefined();
+    expect(harness.updates[0]?.preferred_location).toBeUndefined();
+    expect(harness.updates[0]?.order_source_mix).toBe("STENZ STORE: 4");
+    expect(harness.updates[0]?.primary_order_source).toBe("Online Store");
+    expect(harness.updates[0]?.purchase_consistency).toBe("Highly Consistent");
+    expect(harness.updates[0]?.lifetime_value).toBe("100.00");
+    expect(harness.updates[0]?.last_order_type).toBe("Delivery");
+    expect(await harness.deps.orderSummaries.smembers(orderBackfillKey("loc1"))).toEqual(["contact1"]);
+
+    const second = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
+    expect(await second.json()).toEqual({ accepted: true, written: true });
+    expect(harness.updates[1]?.favorite_item).toBe("Koshari");
+    expect(harness.updates[1]?.top_items).toBe("Koshari");
+    expect(harness.updates[1]?.preferred_order_type).toBe("Delivery");
+    expect(harness.updates[1]?.preferred_location).toBe("STENZ STORE");
+    expect(harness.updates[1]?.lifetime_value).toBe("100.00");
+    expect(harness.updates[1]?.order_source_mix).toBe("STENZ STORE: 4");
+
+    const third = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
+    expect(await third.json()).toEqual({ accepted: true, written: false });
+    expect(harness.updates).toHaveLength(2);
   });
 
   it("returns the same 401 for an unknown tenant, an inactive tenant, and a bad token", async () => {
