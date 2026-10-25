@@ -1,4 +1,6 @@
 import { readBranchName, readSourceName } from "../metrics/location.js";
+import { round2 } from "../metrics/round.js";
+import type { OrderLine } from "../metrics/types.js";
 import type { GhlContact, GhlContactField, GhlCustomField, GhlOrder } from "./types.js";
 
 export interface ParsedOrderPage {
@@ -79,9 +81,12 @@ function parseOrder(value: unknown): GhlOrder | null {
     markAsTest: typeof record.markAsTest === "boolean" ? record.markAsTest : null,
     amount: typeof record.amount === "number" || typeof record.amount === "string" ? record.amount : null,
     sourceName: readSourceName(record),
-    sourceSubType: asString(record.sourceSubType),
+    sourceSubType: readSourceSubType(record),
+    sourceType: readSourceType(record),
     deliveryMethod: readDeliveryMethod(record),
     branchName: readBranchName(record),
+    items: readItems(record),
+    couponCode: readCouponCode(record),
     createdAt: asTimestamp(record.createdAt),
     updatedAt: asTimestamp(record.updatedAt),
     currency: asString(record.currency),
@@ -141,6 +146,96 @@ function readDeliveryMethod(record: Record<string, unknown>): string | null {
   const delivery = record.delivery;
   if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) return null;
   return asString((delivery as Record<string, unknown>).method);
+}
+
+function readSourceRecord(record: Record<string, unknown>): Record<string, unknown> | null {
+  const source = record.source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  return source as Record<string, unknown>;
+}
+
+function readSourceType(record: Record<string, unknown>): string | null {
+  return asString(record.sourceType) ?? asString(readSourceRecord(record)?.type);
+}
+
+function readSourceSubType(record: Record<string, unknown>): string | null {
+  return asString(record.sourceSubType) ?? asString(readSourceRecord(record)?.subType);
+}
+
+/**
+ * Coupon is read when the detail has one. `couponCode: null` on the list payload
+ * stays null. The service never writes last_coupon_code.
+ */
+function readCouponCode(record: Record<string, unknown>): string | null {
+  const direct = asString(record.couponCode);
+  if (direct) return direct;
+  const coupon = record.coupon;
+  if (typeof coupon === "string") return asString(coupon);
+  if (!coupon || typeof coupon !== "object" || Array.isArray(coupon)) return null;
+  return asString((coupon as Record<string, unknown>).code);
+}
+
+function readItems(record: Record<string, unknown>): OrderLine[] {
+  if (!Array.isArray(record.items)) return [];
+  const items: OrderLine[] = [];
+  for (const value of record.items) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    items.push(readItem(value as Record<string, unknown>));
+  }
+  return items;
+}
+
+function readItem(item: Record<string, unknown>): OrderLine {
+  const product = asRecord(item.product);
+  const name = asText(product?.name) ?? asText(item.name);
+  const productId = asString(product?._id) ?? asString(item.productId);
+  const qty = readQty(item.qty) ?? readQty(item.quantity);
+  const unitAmount = readPriceAmount(item.price);
+  const spend = qty !== null && unitAmount !== null ? round2(unitAmount * qty) : null;
+  return {
+    productId,
+    name,
+    qty,
+    spend,
+    collectionIds: readCollectionIds(product?.collectionIds),
+  };
+}
+
+function readPriceAmount(price: unknown): number | null {
+  const record = asRecord(price);
+  if (!record) return null;
+  return readQty(record.amount);
+}
+
+function readQty(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function readCollectionIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ids: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (trimmed) ids.push(trimmed);
+  }
+  return ids;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function asString(value: unknown): string | null {

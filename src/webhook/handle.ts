@@ -1,4 +1,6 @@
 import type { GhlClient } from "../ghl/index.js";
+import type { OrderSummaryCache } from "../ghl/order-summary-cache.js";
+import { WEBHOOK_DETAIL_FETCH_LIMIT } from "../ghl/resolve-order-summaries.js";
 import { ALPHANUMERIC_ID } from "../ids.js";
 import { readWebhookToken, webhookTokenMatches } from "../http/webhook-token.js";
 import { json } from "../http/json.js";
@@ -18,6 +20,7 @@ const EVENT_TTL_SECONDS = 300;
 export interface WebhookDeps {
   tenants: TenantStore;
   idempotency: IdempotencyStore;
+  orderSummaries: OrderSummaryCache;
   encryptionKey: Buffer;
   ghlFactory: (args: { apiKey: string; locationId: string }) => GhlClient;
   now: () => Date;
@@ -143,6 +146,8 @@ async function compute(
     timeZone: tenant.timezone,
     now: deps.now(),
     idempotency: deps.idempotency,
+    orderSummaries: deps.orderSummaries,
+    summaryFetchLimit: WEBHOOK_DETAIL_FETCH_LIMIT,
   });
   return { written: result.written };
 }

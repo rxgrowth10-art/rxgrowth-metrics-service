@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT } from "../../api/webhooks/ghl.js";
 import type { GhlClient } from "../../src/ghl/index.js";
+import { MemoryOrderSummaryCache } from "../../src/ghl/order-summary-cache.js";
 import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
 import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
 import { hashWebhookToken } from "../../src/http/webhook-token.js";
@@ -93,6 +94,7 @@ function deps(options?: {
   const webhookDeps: WebhookDeps = {
     tenants,
     idempotency: new MemoryIdempotencyStore(() => NOW.getTime()),
+    orderSummaries: new MemoryOrderSummaryCache(() => NOW.getTime()),
     encryptionKey: KEY,
     ghlFactory: ({ apiKey, locationId }) => {
       seenKeys.push(`${locationId}:${apiKey}`);

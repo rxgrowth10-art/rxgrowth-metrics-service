@@ -1,4 +1,6 @@
 import { ORDER_PAGE_SIZE, type GhlClient, type GhlOrder } from "../ghl/index.js";
+import type { OrderSummaryCache } from "../ghl/order-summary-cache.js";
+import { orderBackfillKey } from "../ghl/order-summary.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
 import { log } from "../log/logger.js";
 import { parseInstant } from "../time/business-date.js";
@@ -83,6 +85,12 @@ export function orderTouchesWindow(order: { updatedAt?: string | null; createdAt
  * the tenant timezone the same hop scans every contact instead, up to the
  * safety page cap, and stores progress on `m06full`. The in-progress cursor
  * keeps at most {@link MAX_CURSOR_SEEN} contact ids.
+ *
+ * Before that scan, contacts on `m06:backfill:{locationId}` are recomputed
+ * without the webhook's two-detail cap so their order summaries can catch up.
+ * The weekly full scan warms the same cache for every contact. Those detail
+ * reads use the GHL client's spacing (100ms in production) and stop when this
+ * hop's budget runs out. Returning true resumes on the existing cursor.
  */
 export async function reconcileRecentOrders(args: {
   client: GhlClient;
@@ -94,6 +102,7 @@ export async function reconcileRecentOrders(args: {
   budgetMs: number;
   summary: M10Summary;
   fresh: Map<string, Record<string, string>>;
+  orderSummaries?: OrderSummaryCache;
 }): Promise<boolean> {
   const weekday = args.deps.fullReconcileWeekday ?? DEFAULT_FULL_RECONCILE_WEEKDAY;
   const full = isFullReconcileDay(args.deps.now(), args.tenant.timezone, weekday);
@@ -111,6 +120,10 @@ export async function reconcileRecentOrders(args: {
   let pages = 0;
   const now = () => args.deps.now();
   const overBudget = () => now().getTime() - args.startedMs >= args.budgetMs;
+  if (args.orderSummaries && (await drainOrderBackfill({ ...args, cache: args.orderSummaries, seen, overBudget, now }))) {
+    await saveCursor(args.idempotency, key, { offset, seen: boundedSeen(seen, seenCap(args.deps)) });
+    return true;
+  }
   while (pages < cap) {
     const page = await args.client.listLocationOrdersPage(offset);
     pages += 1;
@@ -126,6 +139,13 @@ export async function reconcileRecentOrders(args: {
           timeZone: args.tenant.timezone,
           now: now(),
           idempotency: args.idempotency,
+          ...(args.orderSummaries
+            ? {
+                orderSummaries: args.orderSummaries,
+                summaryFetchLimit: Number.POSITIVE_INFINITY,
+                shouldStop: overBudget,
+              }
+            : {}),
         });
         if (result.status === "written") args.summary.reconciled += 1;
         if (result.status === "unchanged") args.summary.reconcileUnchanged += 1;
@@ -173,6 +193,50 @@ export async function reconcileRecentOrders(args: {
       await saveCursor(args.idempotency, key, { offset, seen: boundedSeen(seen, seenCap(args.deps)) });
       return true;
     }
+  }
+  return false;
+}
+
+/**
+ * Drain `m06:backfill:{locationId}`. A contact stays in the set until every
+ * missing order detail has been cached. Returns true when the hop budget is
+ * spent and the caller should continue later.
+ */
+async function drainOrderBackfill(args: {
+  client: GhlClient;
+  tenant: Tenant;
+  idempotency: IdempotencyStore;
+  cache: OrderSummaryCache;
+  summary: M10Summary;
+  fresh: Map<string, Record<string, string>>;
+  seen: Set<string>;
+  overBudget: () => boolean;
+  now: () => Date;
+}): Promise<boolean> {
+  const key = orderBackfillKey(args.tenant.locationId);
+  const members = await args.cache.smembers(key);
+  for (const contactId of members) {
+    if (args.overBudget()) return true;
+    const result = await runLockedM06({
+      client: args.client,
+      contactId,
+      locationId: args.tenant.locationId,
+      timeZone: args.tenant.timezone,
+      now: args.now(),
+      idempotency: args.idempotency,
+      orderSummaries: args.cache,
+      summaryFetchLimit: Number.POSITIVE_INFINITY,
+      shouldStop: args.overBudget,
+    });
+    if (result.status === "written") args.summary.reconciled += 1;
+    if (result.status === "unchanged") args.summary.reconcileUnchanged += 1;
+    if (result.status === "failed") args.summary.errors += 1;
+    if (result.values) args.fresh.set(contactId, result.values);
+    if (result.status !== "locked" && result.status !== "failed" && result.incomplete !== true) {
+      await args.cache.srem(key, contactId);
+      args.seen.add(contactId);
+    }
+    if (args.overBudget()) return true;
   }
   return false;
 }

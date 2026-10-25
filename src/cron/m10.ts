@@ -1,4 +1,5 @@
 import type { GhlClient, GhlContact } from "../ghl/index.js";
+import type { OrderSummaryCache } from "../ghl/order-summary-cache.js";
 import { bearerMatches } from "../http/auth.js";
 import { json } from "../http/json.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
@@ -21,6 +22,8 @@ const MAX_INLINE_HOPS = 50;
 export interface M10Deps {
   tenants: TenantStore;
   idempotency: IdempotencyStore;
+  /** Order-detail summaries. Absent only in tests that predate the cache. */
+  orderSummaries?: OrderSummaryCache;
   encryptionKey: Buffer;
   cronSecret: string | null;
   enrollEnabled: boolean;
@@ -222,6 +225,7 @@ async function runTenant(
     budgetMs: budget,
     summary,
     fresh,
+    ...(deps.orderSummaries ? { orderSummaries: deps.orderSummaries } : {}),
   });
   if (reconcileAgain) return true;
   let cursor = await readCursor(deps, tenant.locationId, day);

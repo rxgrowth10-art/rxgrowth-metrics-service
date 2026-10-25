@@ -1,6 +1,7 @@
 import { readFullReconcileWeekday, readReconcileHours, readReconcileMaxPages } from "../cron/reconcile.js";
 import { createGhlClient, type GhlClient } from "../ghl/index.js";
-import { createIdempotencyStore, type IdempotencyStore } from "../idempotency/index.js";
+import { createOrderSummaryCache, createRedisClient, type OrderSummaryCache } from "../ghl/order-summary-cache.js";
+import { createIdempotencyStore, type IdempotencyStore, type RedisSetNx } from "../idempotency/index.js";
 import {
   createEnvTenantStore,
   createNeonTenantStore,
@@ -11,6 +12,7 @@ import {
 export interface AppDeps {
   tenants: TenantStore;
   idempotency: IdempotencyStore;
+  orderSummaries: OrderSummaryCache;
   encryptionKey: Buffer;
   cronSecret: string | null;
   enrollEnabled: boolean;
@@ -26,9 +28,11 @@ export function createDefaultDeps(env: NodeJS.ProcessEnv = process.env): AppDeps
   if (!keyRaw) throw new Error("TENANT_KEY_ENCRYPTION_KEY is not set");
   const encryptionKey = parseEncryptionKey(keyRaw);
   const baseUrl = env.GHL_API_BASE_URL;
+  const redis = createRedisClient(env);
   return {
     tenants: createTenantStore(env, encryptionKey),
-    idempotency: createIdempotencyStore(env),
+    idempotency: createIdempotencyStore(env, redis ? (redis as unknown as RedisSetNx) : undefined),
+    orderSummaries: createOrderSummaryCache(env, redis),
     encryptionKey,
     cronSecret: emptyToNull(env.CRON_SECRET),
     enrollEnabled: env.M10_ENROLL_ENABLED === "true",
