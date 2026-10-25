@@ -76,6 +76,10 @@ describe("M06 writeback", () => {
     expect(value("lifetime_value")).toBe("25.50");
     expect(value("lifecycle_stage")).toBe("NEW");
     expect(value("last_order_type")).toBe("Delivery");
+    expect(value("preferred_order_type")).toBe("Delivery");
+    expect(value("favorite_item")).toBe("");
+    expect(value("top_items")).toBe("");
+    expect(value("purchase_consistency")).toBe("Insufficient Data");
     expect(value("metrics_hash")).toBe(result.hash);
     expect(value("m06_intelligence_updated_at")).toBe("2026-01-11");
     expect(value("days_overdue")).toBe("");
@@ -171,10 +175,16 @@ describe("M06 writeback", () => {
       now: NOW,
     });
     const fields = unmapped.updates[0] ?? [];
-    expect(fields.map((field) => field.key)).toEqual(M06_WRITTEN_KEYS.filter((key) => key !== "last_order_type"));
-    expect(fields.some((field) => field.key === "last_order_type")).toBe(false);
+    expect(fields.map((field) => field.key)).toEqual(
+      M06_WRITTEN_KEYS.filter((key) => key !== "last_order_type" && key !== "preferred_order_type"),
+    );
+    expect(fields.some((field) => field.key === "last_order_type" || field.key === "preferred_order_type")).toBe(false);
     expect(fields.find((field) => field.key === "metrics_hash")?.value).toBe(
-      metricsHash({ ...Object.fromEntries(fields.map((field) => [field.key, field.value])), last_order_type: "" }),
+      metricsHash({
+        ...Object.fromEntries(fields.map((field) => [field.key, field.value])),
+        last_order_type: "",
+        preferred_order_type: "",
+      }),
     );
 
     const mapped = clientWith();
@@ -200,6 +210,59 @@ describe("M06 writeback", () => {
     const fields = none.updates[0] ?? [];
     expect(fields.some((field) => field.key === "last_order_location")).toBe(true);
     expect(fields.find((field) => field.key === "last_order_location")?.value).toBe("");
+  });
+
+  it("leaves detail fields out of an incomplete hash, then writes them on the complete pass", async () => {
+    const orders = [
+      order({
+        id: "o1",
+        amount: 40,
+        createdAt: "2026-06-01T00:00:00.000Z",
+        sourceName: "STENZ STORE",
+        sourceType: "website",
+        sourceSubType: "store",
+        deliveryMethod: "shipping",
+        items: [{ productId: "prod_1", name: "Koshari", qty: 2, spend: 40, collectionIds: [] }],
+      }),
+    ];
+    const harness = clientWith(orders);
+    const first = await writeM06Metrics({
+      client: harness.client,
+      contactId: "contact_1",
+      orders,
+      timeZone: "UTC",
+      now: NOW,
+      orderDetailsComplete: false,
+    });
+    const second = await writeM06Metrics({
+      client: harness.client,
+      contactId: "contact_1",
+      orders,
+      timeZone: "UTC",
+      now: NOW,
+      orderDetailsComplete: false,
+    });
+    expect(first.written).toBe(true);
+    expect(second).toEqual({ written: false, hash: first.hash, reason: "unchanged" });
+    expect(harness.updates[0]?.some((field) => field.key === "favorite_item")).toBe(false);
+    expect(harness.updates[0]?.find((field) => field.key === "order_source_mix")?.value).toBe("STENZ STORE: 1");
+    expect(harness.updates[0]?.find((field) => field.key === "primary_order_source")?.value).toBe("Online Store");
+    expect(harness.updates[0]?.find((field) => field.key === "lifetime_value")?.value).toBe("40.00");
+
+    const complete = await writeM06Metrics({
+      client: harness.client,
+      contactId: "contact_1",
+      orders,
+      timeZone: "UTC",
+      now: NOW,
+      orderDetailsComplete: true,
+    });
+    expect(complete.written).toBe(true);
+    expect(complete.hash).not.toBe(first.hash);
+    expect(harness.updates[1]?.find((field) => field.key === "favorite_item")?.value).toBe("Koshari");
+    expect(harness.updates[1]?.find((field) => field.key === "preferred_order_type")?.value).toBe("Delivery");
+    expect(harness.updates[1]?.find((field) => field.key === "lifetime_value")?.value).toBe("40.00");
+    expect(harness.updates).toHaveLength(2);
   });
 
   it("hashes the written values independent of key order and ignores the timestamp", () => {

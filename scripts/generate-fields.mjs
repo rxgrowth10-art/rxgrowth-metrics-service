@@ -32,6 +32,13 @@ const M06_WRITTEN_KEYS = [
   "expected_next_order_date",
   "days_overdue",
   "overdue_ratio",
+  "favorite_item",
+  "top_items",
+  "preferred_order_type",
+  "preferred_location",
+  "purchase_consistency",
+  "order_source_mix",
+  "primary_order_source",
   "metrics_hash",
   "m06_intelligence_updated_at",
 ];

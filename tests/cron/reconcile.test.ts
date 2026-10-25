@@ -9,6 +9,7 @@ import {
   readReconcileMaxPages,
 } from "../../src/cron/reconcile.js";
 import type { CustomFieldWrite, GhlClient, GhlContact, GhlOrder, GhlOrderPage } from "../../src/ghl/index.js";
+import type { OrderLine } from "../../src/metrics/types.js";
 import { MemoryOrderSummaryCache, type OrderSummaryCache } from "../../src/ghl/order-summary-cache.js";
 import { orderBackfillKey, orderSummaryKey, parseStoredSummary } from "../../src/ghl/order-summary.js";
 import { parseOrderPage } from "../../src/ghl/parse.js";
@@ -74,6 +75,7 @@ function harness(options?: {
   now?: Date;
   timezone?: string;
   orderSummaries?: OrderSummaryCache;
+  getOrder?: (orderId: string) => Promise<GhlOrder | null>;
 }) {
   const tenants = new MemoryTenantStore();
   const listed: string[] = [];
@@ -89,7 +91,8 @@ function harness(options?: {
       listed.push(contactId);
       return options?.contactOrders?.(contactId) ?? [];
     },
-    async getOrder() {
+    async getOrder(orderId) {
+      if (options?.getOrder) return options.getOrder(orderId);
       return order({ deliveryMethod: null, markAsTest: false });
     },
     async getContact(contactId) {
@@ -627,6 +630,47 @@ describe("M06 order reconcile", () => {
       const raw = await cache.mget([orderSummaryKey("loc_1", `bf_${index}`, updatedAt)]);
       expect(parseStoredSummary(raw[0], `bf_${index}`, updatedAt)).toMatchObject({ orderId: `bf_${index}` });
     }
+  });
+
+  it("writes detail fields when the backfill drain has a summary for every qualifying order", async () => {
+    const cache = new MemoryOrderSummaryCache(() => NOW.getTime());
+    await cache.sadd(orderBackfillKey("loc_1"), "contact_backfill");
+    const line: OrderLine = { productId: "prod_1", name: "Koshari", qty: 1, spend: 30, collectionIds: [] };
+    const { updates } = await run({
+      orderSummaries: cache,
+      pages: () => ({ orders: [], totalCount: 0 }),
+      contactOrders: () => [
+        order({
+          id: "bf_0",
+          contactId: "contact_backfill",
+          amount: 30,
+          createdAt: "2026-06-01T00:00:00.000Z",
+          updatedAt: "2026-06-01T00:00:00.000Z",
+          sourceType: "pos",
+          sourceName: "Counter",
+          sourceSubType: null,
+        }),
+      ],
+      getOrder: async (orderId) =>
+        order({
+          id: orderId,
+          items: [line],
+          deliveryMethod: "pickup",
+          branchName: "Maadi",
+          markAsTest: false,
+          sourceType: "pos",
+          sourceName: "Counter",
+          sourceSubType: null,
+        }),
+    });
+    const metrics = updates.find((update) => update.fields.some((field) => field.key === "favorite_item"));
+    expect(valueOf(metrics?.fields, "favorite_item")).toBe("Koshari");
+    expect(valueOf(metrics?.fields, "top_items")).toBe("Koshari");
+    expect(valueOf(metrics?.fields, "preferred_order_type")).toBe("Pickup");
+    expect(valueOf(metrics?.fields, "preferred_location")).toBe("Maadi");
+    expect(valueOf(metrics?.fields, "primary_order_source")).toBe("POS");
+    expect(valueOf(metrics?.fields, "lifetime_value")).toBe("30.00");
+    expect(await cache.smembers(orderBackfillKey("loc_1"))).toEqual([]);
   });
 
   it("leaves a backfill contact queued when the hop budget is already spent", async () => {

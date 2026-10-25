@@ -1,5 +1,8 @@
 import { addCalendarDays, businessDateString, calendarDayDifference } from "../time/business-date.js";
+import { rankChannels } from "./channels.js";
+import { purchaseConsistencyLabel } from "./consistency.js";
 import { frequencyBucket, trailing12MonthOrderCount } from "./frequency.js";
+import { rankFavoriteItems } from "./items.js";
 import { resolveLastOrderLocation } from "./location.js";
 import { averageIntervalDays, orderIntervalsDays, typicalIntervalDays } from "./intervals.js";
 import { customerStatus, customerType, lifecycleStage } from "./lifecycle.js";
@@ -34,6 +37,8 @@ export function computeM06(orders: readonly MetricOrder[], timeZone: string, now
     daysSinceLastOrder !== null && hasTypical ? round2(daysSinceLastOrder / typicalOrderIntervalDays) : null;
   const windows = today ? windowCounts(sorted, timeZone, today) : emptyWindows();
   const trailing = today ? trailing12MonthOrderCount(sorted, timeZone, today) : 0;
+  const items = rankFavoriteItems(sorted);
+  const channels = rankChannels(sorted);
 
   return {
     qualifyingOrderCount: count,
@@ -75,6 +80,13 @@ export function computeM06(orders: readonly MetricOrder[], timeZone: string, now
     lifecycleStage: lifecycleStage(count, daysSinceLastOrder),
     customerType: customerType(count),
     customerStatus: customerStatus(count, daysSinceLastOrder),
+    favoriteItem: items.favoriteItem,
+    topItems: items.topItems,
+    preferredOrderType: channels.preferredOrderType,
+    preferredLocation: channels.preferredLocation,
+    purchaseConsistency: purchaseConsistencyLabel(intervals),
+    orderSourceMix: channels.orderSourceMix,
+    primaryOrderSource: channels.primaryOrderSource,
   };
 }
 

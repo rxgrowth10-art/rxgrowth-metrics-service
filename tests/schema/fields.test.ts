@@ -63,6 +63,45 @@ describe("generated field contract", () => {
       dataType: "TEXT",
       testLabId: "2VAJ1dipwBArGbM5GUX0",
     });
+    expect(fieldByKey("favorite_item")).toMatchObject({
+      writer: "m06",
+      dataType: "TEXT",
+      testLabId: "VIdTmboEkxEgeDGvPVZn",
+    });
+    expect(fieldByKey("top_items")).toMatchObject({
+      writer: "m06",
+      dataType: "LARGE_TEXT",
+      testLabId: "kXOadhDKENrfuwrIMhnp",
+    });
+    expect(fieldByKey("preferred_location")).toMatchObject({
+      writer: "m06",
+      dataType: "TEXT",
+      testLabId: "k6MWzkT7MA8ktC8W9x6u",
+    });
+    expect(fieldByKey("order_source_mix")).toMatchObject({
+      writer: "m06",
+      dataType: "LARGE_TEXT",
+      testLabId: "EAJA4lVVyimYZ4ribDCQ",
+    });
+    expect(fieldByKey("preferred_order_type")?.picklistOptions).toEqual(["Delivery", "Pickup", "Dine-in"]);
+    expect(fieldByKey("primary_order_source")?.picklistOptions).toEqual([
+      "Online Store",
+      "POS",
+      "Delivery Platform",
+      "Manual",
+      "Imported",
+      "Other",
+    ]);
+    expect(fieldByKey("purchase_consistency")?.picklistOptions).toEqual([
+      "Highly Consistent",
+      "Consistent",
+      "Variable",
+      "Sporadic",
+      "Insufficient Data",
+    ]);
+    expect(fieldByKey("favorite_category")?.writer).toBe("external");
+    expect(fieldByKey("top_categories")?.writer).toBe("external");
+    expect(fieldByKey("category_diversity")?.writer).toBe("external");
     expect(M10_WRITTEN_KEYS).toEqual(["winback_eligibility", "winback_tier"]);
     expect(WORKFLOW_OWNED_KEYS).toEqual(["winback_cycle_status", "winback_cycle_started_at"]);
     expect(M06_HASH_EXCLUDED_KEYS).toEqual(["metrics_hash", "m06_intelligence_updated_at"]);
@@ -106,6 +145,13 @@ describe("generated field contract", () => {
       "expected_next_order_date",
       "days_overdue",
       "overdue_ratio",
+      "favorite_item",
+      "top_items",
+      "preferred_order_type",
+      "preferred_location",
+      "purchase_consistency",
+      "order_source_mix",
+      "primary_order_source",
       "metrics_hash",
       "m06_intelligence_updated_at",
     ]);

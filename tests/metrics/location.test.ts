@@ -139,10 +139,12 @@ describe("last order location", () => {
     const moved = await applyLatestOrderDetail([listed], async () => branched);
     const withBranch = formatM06Values(computeM06(moved, "Africa/Cairo", NOW));
     expect(withBranch.last_order_location).toBe("Maadi");
-    const { last_order_location: branchLocation, ...branchRest } = withBranch;
-    const { last_order_location: sourceLocation, ...sourceRest } = stayed;
+    const { last_order_location: branchLocation, preferred_location: preferredBranch, ...branchRest } = withBranch;
+    const { last_order_location: sourceLocation, preferred_location: preferredSource, ...sourceRest } = stayed;
     expect(branchLocation).toBe("Maadi");
     expect(sourceLocation).toBe("STENZ STORE");
+    expect(preferredBranch).toBe("Maadi");
+    expect(preferredSource).toBe("STENZ STORE");
     expect(branchRest).toEqual(sourceRest);
     expect(metricsHash(withBranch)).not.toBe(metricsHash(stayed));
   });

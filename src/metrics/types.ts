@@ -84,4 +84,14 @@ export interface CustomerMetrics {
   lifecycleStage: string;
   customerType: CustomerType;
   customerStatus: CustomerStatus;
+  favoriteItem: string | null;
+  /** Up to five product names, separated by ", ". */
+  topItems: string | null;
+  /** Raw checkout method (`shipping` or `pickup`) of the preferred type. */
+  preferredOrderType: string | null;
+  preferredLocation: string | null;
+  purchaseConsistency: string;
+  orderSourceMix: string | null;
+  /** Mapped picklist label. Null when no qualifying order was classified. */
+  primaryOrderSource: string | null;
 }

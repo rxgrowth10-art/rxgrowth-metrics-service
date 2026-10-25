@@ -24,15 +24,16 @@ import { computeM06, contactOrderSummaries, viewContactOrders } from "../../src/
 import { M06_WRITTEN_KEYS, M10_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
 import { formatM06Values } from "../../src/writeback/format.js";
 import { metricsHash } from "../../src/writeback/hash.js";
+import { M06_DETAIL_FIELD_KEYS } from "../../src/writeback/m06.js";
 import { recomputeM06Contact } from "../../src/writeback/recompute.js";
 import { order } from "../helpers/orders.js";
 
 const NOW = new Date("2026-10-24T12:00:00.000Z");
 const FIXTURE_HASHES = {
-  list: "ea1caf1f11a01ba912c2fdee88afc5acb9de654baafd5ee4f26b6351ba96bc7a",
-  shipping: "3593974a9a22b7625bb530e6cc50ae737766103ae419d336d208b5b2d5a02e0c",
-  pickup: "db93e63cd4aa7f0d72705723e1f13ab0e2f79fd37c65a22a7c6d31ff4316f426",
-  bare: "0033888f326d66a3be0eb172b75d1c788378bf6b2a8aa5d8ac526f33c40fc7cc",
+  list: "2fe33c1b609555c4f230ebe6fd50344d86a35a1e4686ca27243f5e3ca751f6c7",
+  shipping: "c80003e4fff0d11924cd9f195959fcaffc1c6416027216e3bc84044422ac95af",
+  pickup: "43779d006d76d59c4726931e31de78da09549f47d8ff18766bbd66d32233ceb1",
+  bare: "152aac0cf117b4041349ec593a36f3229acd080f0d09ce57df75d60495209519",
 } as const;
 
 function load(name: string): unknown {
@@ -158,10 +159,27 @@ describe("order detail parsing", () => {
     expect(shipping).toMatchObject({ deliveryMethod: "shipping", items: [], couponCode: null, branchName: null });
     expect(pickup?.deliveryMethod).toBe("pickup");
     expect(bare?.deliveryMethod).toBeNull();
-    expect(hashOrders(page.orders)).toBe(FIXTURE_HASHES.list);
-    expect(shipping ? hashOrders([shipping]) : null).toBe(FIXTURE_HASHES.shipping);
-    expect(pickup ? hashOrders([pickup]) : null).toBe(FIXTURE_HASHES.pickup);
-    expect(bare ? hashOrders([bare]) : null).toBe(FIXTURE_HASHES.bare);
+    const listValues = formatM06Values(computeM06(page.orders, "Africa/Cairo", NOW));
+    expect(listValues.lifetime_value).toBe("133.50");
+    expect(listValues.total_orders).toBe("2");
+    expect(listValues.last_order_type).toBe("");
+    expect(listValues.primary_order_source).toBe("Online Store");
+    expect(listValues.purchase_consistency).toBe("Insufficient Data");
+    expect(shipping ? formatM06Values(computeM06([shipping], "Africa/Cairo", NOW)).last_order_type : null).toBe(
+      "Delivery",
+    );
+    expect(shipping ? formatM06Values(computeM06([shipping], "Africa/Cairo", NOW)).lifetime_value : null).toBe("40.00");
+    expect(pickup ? formatM06Values(computeM06([pickup], "Africa/Cairo", NOW)).preferred_order_type : null).toBe(
+      "Pickup",
+    );
+    expect(bare ? formatM06Values(computeM06([bare], "Africa/Cairo", NOW)).preferred_order_type : null).toBe("");
+    const hashes = {
+      list: hashOrders(page.orders),
+      shipping: shipping ? hashOrders([shipping]) : null,
+      pickup: pickup ? hashOrders([pickup]) : null,
+      bare: bare ? hashOrders([bare]) : null,
+    };
+    expect(hashes).toEqual(FIXTURE_HASHES);
   });
 });
 
@@ -441,7 +459,7 @@ describe("order summary cache", () => {
 });
 
 describe("webhook summary pass", () => {
-  it("uses the cached latest detail without another fetch and does not write new keys", async () => {
+  it("omits detail fields while a summary is missing, then writes them once the pass is complete", async () => {
     const cache = new MemoryOrderSummaryCache(() => NOW.getTime());
     const orders = [1, 2, 3, 4].map((index) =>
       order({
@@ -468,7 +486,7 @@ describe("webhook summary pass", () => {
       ]),
     );
     let fetches = 0;
-    const updates: string[][] = [];
+    const updates: Array<Record<string, string>> = [];
     const client = summaryClient(orders, async (orderId) => {
       fetches += 1;
       return details.get(orderId) ?? null;
@@ -485,34 +503,42 @@ describe("webhook summary pass", () => {
     });
     expect(fetches).toBe(3);
     expect(cold.incomplete).toBe(true);
+    expect(cold.written).toBe(true);
     expect(cold.summaries.map((summary) => summary?.orderId ?? null)).toEqual(["o1", "o2", null, "o4"]);
     expect(await cache.smembers(orderBackfillKey("loc_1"))).toEqual(["contact_1"]);
-    expect(updates[0]).toEqual([...M06_WRITTEN_KEYS]);
-    expect(updates[0]).not.toContain("last_coupon_code");
-    expect(updates[0]).not.toContain("favorite_item");
+    const detailKeys = new Set<string>(M06_DETAIL_FIELD_KEYS);
+    expect(Object.keys(updates[0] ?? {})).toEqual(M06_WRITTEN_KEYS.filter((key) => !detailKeys.has(key)));
+    expect(updates[0]?.favorite_item).toBeUndefined();
+    expect(updates[0]?.top_items).toBeUndefined();
+    expect(updates[0]?.preferred_order_type).toBeUndefined();
+    expect(updates[0]?.preferred_location).toBeUndefined();
+    expect(updates[0]?.last_coupon_code).toBeUndefined();
+    expect(updates[0]?.order_source_mix).toBe("STENZ STORE: 4");
+    expect(updates[0]?.primary_order_source).toBe("Online Store");
+    expect(updates[0]?.purchase_consistency).toBe("Highly Consistent");
+    expect(updates[0]?.lifetime_value).toBe("100.00");
+    expect(updates[0]?.last_order_type).toBe("Delivery");
     expect(M10_WRITTEN_KEYS).toEqual(["winback_eligibility", "winback_tier"]);
-    expect(M06_WRITTEN_KEYS).not.toContain("favorite_item");
-    expect(M06_WRITTEN_KEYS).not.toContain("top_items");
+    expect(M06_WRITTEN_KEYS).toContain("favorite_item");
+    expect(M06_WRITTEN_KEYS).toContain("top_items");
     expect(M06_WRITTEN_KEYS).not.toContain("last_coupon_code");
+    expect(M06_WRITTEN_KEYS).not.toContain("favorite_category");
+    const partial = formatM06Values(computeM06(cold.orders, "UTC", NOW));
+    expect(partial.favorite_item).toBe("test product");
 
-    const warmOrders = orders.map((entry) => order({ ...entry }));
+    const missing = orders[2];
+    if (!missing?.id) throw new Error("missing order");
+    const missingDetail = details.get(missing.id);
+    const missingSummary = missingDetail ? summaryFromDetail(missing, missingDetail) : null;
+    if (!missingSummary) throw new Error("missing summary");
     await cache.setMany(
-      warmOrders.flatMap((entry) => {
-        const detail = details.get(entry.id);
-        const summary = detail ? summaryFromDetail(entry, detail) : null;
-        if (!summary || !entry.id) return [];
-        return [{ key: orderSummaryKey("loc_1", entry.id, entry.updatedAt), value: serializeOrderSummary(summary) }];
-      }),
+      [{ key: orderSummaryKey("loc_1", missing.id, missing.updatedAt), value: serializeOrderSummary(missingSummary) }],
       ORDER_SUMMARY_TTL_SECONDS,
     );
     const before = cache.commands.length;
-    let warmFetches = 0;
-    const warmClient = summaryClient(warmOrders, async (orderId) => {
-      warmFetches += 1;
-      return details.get(orderId) ?? null;
-    }, updates);
+    const fetchedBefore = fetches;
     const warm = await recomputeM06Contact({
-      client: warmClient,
+      client,
       contactId: "contact_1",
       locationId: "loc_1",
       timeZone: "UTC",
@@ -521,22 +547,45 @@ describe("webhook summary pass", () => {
       orderSummaries: cache,
       summaryFetchLimit: WEBHOOK_DETAIL_FETCH_LIMIT,
     });
-    expect(warmFetches).toBe(1);
+    expect(fetches - fetchedBefore).toBe(1);
     expect(warm.incomplete).toBe(false);
+    expect(warm.written).toBe(true);
     expect(cache.commands.slice(before)).toEqual(["mget"]);
-    const enriched = metricsHash(formatM06Values(computeM06(warm.orders, "UTC", NOW)));
-    const stripped = metricsHash(
-      formatM06Values(
-        computeM06(
-          warm.orders.map((entry) => ({ ...entry, detailSummary: null, items: [], couponCode: null, sourceType: null })),
-          "UTC",
-          NOW,
-        ),
+    expect(updates[1]?.favorite_item).toBe("test product");
+    expect(updates[1]?.top_items).toBe("test product");
+    expect(updates[1]?.preferred_order_type).toBe("Delivery");
+    expect(updates[1]?.preferred_location).toBe("STENZ STORE");
+    expect(updates[1]?.lifetime_value).toBe("100.00");
+    expect(updates[1]?.order_source_mix).toBe("STENZ STORE: 4");
+    const enriched = formatM06Values(computeM06(warm.orders, "UTC", NOW));
+    const stripped = formatM06Values(
+      computeM06(
+        warm.orders.map((entry) => ({ ...entry, detailSummary: null, items: [], couponCode: null })),
+        "UTC",
+        NOW,
       ),
     );
-    expect(enriched).toBe(stripped);
+    expect(enriched.favorite_item).toBe("test product");
+    expect(stripped.favorite_item).toBe("");
+    expect(enriched.lifetime_value).toBe(stripped.lifetime_value);
+    expect(enriched.order_source_mix).toBe(stripped.order_source_mix);
+    expect(metricsHash(enriched)).not.toBe(metricsHash(stripped));
     expect(warm.summaries[3]?.couponCode).toBe("SAVE10");
     expect(viewContactOrders(warm.orders, warm.incomplete).incomplete).toBe(false);
+
+    const again = await recomputeM06Contact({
+      client,
+      contactId: "contact_1",
+      locationId: "loc_1",
+      timeZone: "UTC",
+      now: NOW,
+      idempotency: new MemoryIdempotencyStore(() => NOW.getTime()),
+      orderSummaries: cache,
+      summaryFetchLimit: WEBHOOK_DETAIL_FETCH_LIMIT,
+    });
+    expect(again.written).toBe(false);
+    expect(again.incomplete).toBe(false);
+    expect(updates).toHaveLength(2);
   });
 
   it("does not log the detail body when a summary fetch fails", async () => {
@@ -566,7 +615,7 @@ describe("webhook summary pass", () => {
 function summaryClient(
   orders: GhlOrder[],
   getOrder: (orderId: string) => Promise<GhlOrder | null>,
-  updates: string[][],
+  updates: Array<Record<string, string>>,
 ): GhlClient {
   let storedHash: string | null = null;
   const hashId = fieldByKey("metrics_hash")?.testLabId ?? "hash";
@@ -589,7 +638,7 @@ function summaryClient(
       });
     },
     async updateContact(_contactId, fields) {
-      updates.push(fields.map((field) => field.key));
+      updates.push(Object.fromEntries(fields.map((field) => [field.key, field.value])));
       storedHash = fields.find((field) => field.key === "metrics_hash")?.value ?? storedHash;
     },
     async searchContacts() {
