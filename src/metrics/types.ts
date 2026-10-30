@@ -87,6 +87,11 @@ export interface CustomerMetrics {
   favoriteItem: string | null;
   /** Up to five product names, separated by ", ". */
   topItems: string | null;
+  favoriteCategory: string | null;
+  /** Up to five collection names, separated by ", ". */
+  topCategories: string | null;
+  /** Distinct named collections. Null when none of the lines had a name. */
+  categoryDiversity: number | null;
   /** Raw checkout method (`shipping` or `pickup`) of the preferred type. */
   preferredOrderType: string | null;
   preferredLocation: string | null;

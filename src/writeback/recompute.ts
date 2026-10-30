@@ -1,3 +1,4 @@
+import { loadCollectionNames } from "../ghl/collections.js";
 import type { GhlClient, GhlOrder } from "../ghl/index.js";
 import { ORDER_DETAIL_CONCURRENCY, hydrateOrders } from "../ghl/hydrate-orders.js";
 import { applyLatestOrderDetail } from "../ghl/latest-order-detail.js";
@@ -5,7 +6,13 @@ import type { OrderSummaryCache } from "../ghl/order-summary-cache.js";
 import { WEBHOOK_DETAIL_FETCH_LIMIT, resolveOrderSummaries } from "../ghl/resolve-order-summaries.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
 import { log } from "../log/logger.js";
-import { computeM06, contactOrderSummaries, isQualifyingOrder, type OrderDetailSummary } from "../metrics/index.js";
+import {
+  collectCollectionIds,
+  computeM06,
+  contactOrderSummaries,
+  isQualifyingOrder,
+  type OrderDetailSummary,
+} from "../metrics/index.js";
 import { formatM06Values } from "./format.js";
 import { writeM06Metrics } from "./m06.js";
 
@@ -77,10 +84,23 @@ export async function recomputeM06Contact(args: {
     summaries = resolved.summaries;
     incomplete = resolved.incomplete;
   }
-  const values = formatM06Values(computeM06(orders, args.timeZone, args.now));
   const qualifyingCovered = orders
     .filter(isQualifyingOrder)
     .every((order) => order.detailSummary != null);
+  const orderDetailsComplete = !args.orderSummaries || (!incomplete && qualifyingCovered);
+  const collectionIds = orderDetailsComplete ? collectCollectionIds(orders) : [];
+  const collections =
+    collectionIds.length === 0
+      ? { names: new Map<string, string | null>(), ok: true }
+      : await loadCollectionNames({
+          store: args.idempotency,
+          client: args.client,
+          locationId: args.locationId,
+          ids: collectionIds,
+        });
+  const values = formatM06Values(
+    computeM06(orders, args.timeZone, args.now, { collectionNames: collections.names }),
+  );
   const result = await writeM06Metrics({
     client: args.client,
     contactId: args.contactId,
@@ -88,7 +108,9 @@ export async function recomputeM06Contact(args: {
     timeZone: args.timeZone,
     now: args.now,
     fieldCache: { store: args.idempotency, locationId: args.locationId },
-    orderDetailsComplete: !args.orderSummaries || (!incomplete && qualifyingCovered),
+    orderDetailsComplete,
+    collectionNames: collections.names,
+    categoriesResolved: collections.ok,
   });
   return { written: result.written, values, orders, summaries, incomplete };
 }

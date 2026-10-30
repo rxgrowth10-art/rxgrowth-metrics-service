@@ -101,6 +101,9 @@ function harness(options?: {
       if (options?.failSearch && searches === 1) throw new Error("search failed");
       return { contacts: options?.contacts ?? [], searchAfter: null };
     },
+    async listCollections() {
+      return [];
+    },
     async addContactToWorkflow(contactId, workflowId) {
       if (enrollFailuresLeft > 0) {
         enrollFailuresLeft -= 1;
@@ -179,6 +182,9 @@ function pagingClient(
       const key = JSON.stringify(cursor);
       const found = pages.find((_, index) => JSON.stringify(pages[index - 1]?.searchAfter) === key);
       return found ?? { contacts: [], searchAfter: null };
+    },
+    async listCollections() {
+      return [];
     },
     async addContactToWorkflow() {
       return undefined;

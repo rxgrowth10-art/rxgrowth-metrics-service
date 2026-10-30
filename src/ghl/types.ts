@@ -56,6 +56,12 @@ export interface GhlCustomField {
   dataType: string;
 }
 
+/** One product collection. `name` is null when the payload has no usable title. */
+export interface GhlCollection {
+  id: string;
+  name: string | null;
+}
+
 export interface CustomFieldWrite {
   id: string;
   key: string;
@@ -69,6 +75,11 @@ export interface GhlClient {
   getOrder(orderId: string): Promise<GhlOrder | null>;
   getContact(contactId: string): Promise<GhlContact>;
   listCustomFields(): Promise<GhlCustomField[]>;
+  /**
+   * Names for the given collection ids. One request per 100 ids.
+   * `GET /products/collections` with `altId`, `altType=location`, and `collectionIds`.
+   */
+  listCollections(collectionIds: readonly string[]): Promise<GhlCollection[]>;
   updateContact(contactId: string, fields: readonly CustomFieldWrite[]): Promise<void>;
   searchContacts(): Promise<GhlContact[]>;
   searchContactsPage(searchAfter: readonly unknown[] | null): Promise<GhlContactPage>;

@@ -121,6 +121,9 @@ function harness(options?: {
       searches += 1;
       return { contacts: options?.contacts ?? [], searchAfter: null };
     },
+    async listCollections() {
+      return [];
+    },
     async addContactToWorkflow() {
       return undefined;
     },
