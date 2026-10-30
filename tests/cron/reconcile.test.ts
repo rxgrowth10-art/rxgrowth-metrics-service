@@ -251,7 +251,8 @@ describe("M06 order reconcile", () => {
     expect(valueOf(metrics?.fields, "lifetime_value")).toBe("100.00");
     expect(valueOf(metrics?.fields, "qualifying_order_count")).toBe("1");
     const winback = updates.find((update) => update.fields.some((field) => field.key === "winback_eligibility"));
-    expect(winback?.fields.map((field) => field.value)).toEqual(["Not Eligible", "None"]);
+    expect(valueOf(winback?.fields, "winback_eligibility")).toBe("Not Eligible");
+    expect(valueOf(winback?.fields, "winback_tier")).toBe("None");
     expect(listed).toEqual(["c1"]);
     expect(result.summary.reconciled).toBe(1);
     expect(result.continue).toBe(false);
@@ -340,7 +341,8 @@ describe("M06 order reconcile", () => {
       false,
     );
     const winback = updates.find((update) => update.fields.some((field) => field.key === "winback_eligibility"));
-    expect(winback?.fields.map((field) => field.value)).toEqual(["Not Eligible", "None"]);
+    expect(valueOf(winback?.fields, "winback_eligibility")).toBe("Not Eligible");
+    expect(valueOf(winback?.fields, "winback_tier")).toBe("None");
     expect(result.summary.reconcileUnchanged).toBe(1);
     expect(result.summary.reconciled).toBe(0);
   });

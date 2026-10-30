@@ -46,6 +46,13 @@ function tenant(overrides: Partial<Tenant> = {}): Tenant {
   };
 }
 
+function fieldValue(
+  fields: ReadonlyArray<{ key: string; value: string }> | undefined,
+  key: string,
+): string | undefined {
+  return fields?.find((field) => field.key === key)?.value;
+}
+
 function contact(id: string, values: Record<string, string>): GhlContact {
   return {
     id,
@@ -242,18 +249,22 @@ describe("M10 win-back cron", () => {
     const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { written: number; skippedInProgress: number; skippedNoOrders: number; enrolled: number };
-    expect(body.written).toBe(3);
+    expect(body.written).toBe(6);
     expect(body.skippedInProgress).toBe(1);
     expect(body.skippedNoOrders).toBe(1);
     expect(body.enrolled).toBe(0);
     expect(run.enrollments).toEqual([]);
     const written = Object.fromEntries(run.updates.map((update) => [update.contactId, update.fields]));
-    expect(written.high?.map((field) => field.key)).toEqual(["winback_eligibility", "winback_tier"]);
-    expect(written.high?.map((field) => field.value)).toEqual(["Eligible", "High"]);
-    expect(written.medium?.map((field) => field.value)).toEqual(["Eligible", "Medium"]);
-    expect(written.too_few?.map((field) => field.value)).toEqual(["Not Eligible", "None"]);
-    expect(written.in_progress).toBeUndefined();
+    expect(fieldValue(written.high, "winback_eligibility")).toBe("Eligible");
+    expect(fieldValue(written.high, "winback_tier")).toBe("High");
+    expect(fieldValue(written.medium, "winback_eligibility")).toBe("Eligible");
+    expect(fieldValue(written.medium, "winback_tier")).toBe("Medium");
+    expect(fieldValue(written.too_few, "winback_eligibility")).toBe("Not Eligible");
+    expect(fieldValue(written.too_few, "winback_tier")).toBe("None");
+    expect(fieldValue(written.in_progress, "winback_eligibility")).toBeUndefined();
+    expect(fieldValue(written.in_progress, "winback_tier")).toBeUndefined();
     expect(JSON.stringify(run.updates)).not.toContain("winback_cycle");
+    expect(JSON.stringify(run.updates)).not.toContain("metrics_hash");
   });
 
   it("enrolls only when the flag is on and eligibility newly becomes Eligible", async () => {
@@ -297,7 +308,8 @@ describe("M10 win-back cron", () => {
 
     const first = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
     expect(await first.json()).toMatchObject({ written: 1, enrolled: 0, errors: 1 });
-    expect(run.updates[0]?.fields.map((field) => field.value)).toEqual(["Eligible", "High"]);
+    expect(fieldValue(run.updates[0]?.fields, "winback_eligibility")).toBe("Eligible");
+    expect(fieldValue(run.updates[0]?.fields, "winback_tier")).toBe("High");
     expect(run.enrollments).toEqual([]);
     expect(await run.deps.idempotency.get("m10enroll:loc_1:retry")).toBeNull();
 
@@ -356,7 +368,8 @@ describe("M10 win-back cron", () => {
     const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
     const body = (await response.json()) as { written: number };
     expect(body.written).toBe(1);
-    expect(run.updates[0]?.fields.map((field) => field.value)).toEqual(["Not Eligible", "None"]);
+    expect(fieldValue(run.updates[0]?.fields, "winback_eligibility")).toBe("Not Eligible");
+    expect(fieldValue(run.updates[0]?.fields, "winback_tier")).toBe("None");
 
     const locked = harness({ contacts: [] });
     locked.deps.now = () => new Date("2026-06-15T03:30:00.000Z");
@@ -409,7 +422,8 @@ describe("M10 win-back cron", () => {
     await run.tenants.upsert(tenant({ timezone: "America/Chicago" }));
     const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
     expect(response.status).toBe(200);
-    expect(run.updates[0]?.fields.map((field) => field.value)).toEqual(["Not Eligible", "None"]);
+    expect(fieldValue(run.updates[0]?.fields, "winback_eligibility")).toBe("Not Eligible");
+    expect(fieldValue(run.updates[0]?.fields, "winback_tier")).toBe("None");
   });
 
   it("reads every search DATE shape as 2026-10-21 for a timezone behind UTC", async () => {
@@ -429,7 +443,8 @@ describe("M10 win-back cron", () => {
     await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
     expect(run.updates).toHaveLength(4);
     for (const update of run.updates) {
-      expect(update.fields.map((field) => field.value)).toEqual(["Not Eligible", "None"]);
+      expect(fieldValue(update.fields, "winback_eligibility")).toBe("Not Eligible");
+      expect(fieldValue(update.fields, "winback_tier")).toBe("None");
     }
   });
 
@@ -793,6 +808,54 @@ describe("M10 win-back cron", () => {
     expect(seen).toEqual([["page-2"]]);
     expect(await run.deps.idempotency.get(valueDistributionKey("loc_1"))).toBeNull();
     expect(await run.deps.idempotency.get(valueDistributionBuildKey("loc_1", "2026-06-22"))).toBeNull();
+  });
+
+  it("writes behaviour and the summary after VIP, and leaves both off the metrics hash", async () => {
+    const run = harness({
+      contacts: [
+        contact("lapsed", {
+          qualifying_order_count: "4",
+          customer_status: "Lapsed",
+          last_order_date: "2026-01-01",
+          typical_order_interval_days: "14",
+          purchase_consistency: "Highly Consistent",
+          orders_last_30_days: "0",
+        }),
+        contact("waiting", {
+          qualifying_order_count: "4",
+          customer_status: "Active",
+          last_order_date: "2026-06-20",
+          typical_order_interval_days: "14",
+          purchase_consistency: "Variable",
+          orders_last_30_days: "1",
+          lifetime_value: "40.00",
+        }),
+        contact("none", {
+          qualifying_order_count: "0",
+          customer_status: "New",
+          customer_behavior_profile: "Explorer",
+        }),
+      ],
+    });
+    await run.tenants.upsert(tenant({ name: "Koi Roll", currency: "EGP" }));
+    const first = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(first.status).toBe(200);
+    const written = Object.fromEntries(run.updates.map((update) => [update.contactId, update.fields]));
+    expect(fieldValue(written.lapsed, "customer_behavior_profile")).toBe("Lapsed");
+    expect(fieldValue(written.lapsed, "customer_intelligence_summary")).toContain("Koi Roll");
+    expect(fieldValue(written.lapsed, "customer_intelligence_summary")).toContain("Behavior: Lapsed");
+    expect(fieldValue(written.lapsed, "customer_intelligence_summary")).not.toContain("VIP status");
+    expect(fieldValue(written.waiting, "customer_behavior_profile")).toBeUndefined();
+    expect(fieldValue(written.waiting, "customer_intelligence_summary")).toContain("Status: Active");
+    expect(fieldValue(written.waiting, "customer_intelligence_summary")).not.toContain("VIP status");
+    expect(fieldValue(written.none, "customer_behavior_profile")).toBe("");
+    for (const update of run.updates) {
+      expect(update.fields.some((field) => field.key === "metrics_hash")).toBe(false);
+      expect(update.fields.some((field) => field.value === "Deal Sensitive")).toBe(false);
+    }
+
+    const second = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(((await second.json()) as { written: number }).written).toBe(0);
   });
 
   it("does not publish a distribution when the contact scan fails", async () => {

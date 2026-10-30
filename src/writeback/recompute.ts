@@ -16,7 +16,7 @@ import {
   type OrderDetailSummary,
 } from "../metrics/index.js";
 import { formatM06Values } from "./format.js";
-import { writeM06Metrics } from "./m06.js";
+import { includedM06Values, writeM06Metrics } from "./m06.js";
 
 export const CONTACT_LOCK_TTL_SECONDS = 30;
 export const CONTACT_RERUN_TTL_SECONDS = 120;
@@ -103,7 +103,8 @@ export async function recomputeM06Contact(args: {
   const metrics = computeM06(orders, args.timeZone, args.now, { collectionNames: collections.names });
   const valueDistribution = await loadValueDistribution(args.idempotency, args.locationId);
   const valueFields = valueFieldValues(metrics, valueDistribution);
-  const values = valueFields ? { ...formatM06Values(metrics), ...valueFields } : formatM06Values(metrics);
+  const formatted = valueFields ? { ...formatM06Values(metrics), ...valueFields } : formatM06Values(metrics);
+  const values = includedM06Values(formatted, orderDetailsComplete, collections.ok, valueFields !== null);
   const result = await writeM06Metrics({
     client: args.client,
     contactId: args.contactId,

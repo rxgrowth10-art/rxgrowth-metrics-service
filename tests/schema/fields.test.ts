@@ -143,7 +143,34 @@ describe("generated field contract", () => {
       picklistOptions: ["Spend Leader", "Frequency Leader", "High Value & High Frequency", "Emerging VIP", "Not VIP"],
     });
     expect(M06_VALUE_FIELD_KEYS.every((key) => (M06_WRITTEN_KEYS as readonly string[]).includes(key))).toBe(true);
-    expect(M10_WRITTEN_KEYS).toEqual(["winback_eligibility", "winback_tier"]);
+    expect(fieldByKey("customer_behavior_profile")).toMatchObject({
+      writer: "m10",
+      dataType: "SINGLE_OPTIONS",
+      testLabId: "mCVlT3ws2Qds8fHE14c5",
+      picklistOptions: [
+        "Routine Buyer",
+        "Frequent Buyer",
+        "High Value Buyer",
+        "Explorer",
+        "Deal Sensitive",
+        "Occasional Buyer",
+        "At Risk",
+        "Lapsed",
+      ],
+    });
+    expect(fieldByKey("customer_intelligence_summary")).toMatchObject({
+      writer: "m10",
+      dataType: "LARGE_TEXT",
+      testLabId: "jxWj7QJxQf8e5UbzT5Jt",
+    });
+    expect(M06_WRITTEN_KEYS).not.toContain("customer_behavior_profile");
+    expect(M06_WRITTEN_KEYS).not.toContain("customer_intelligence_summary");
+    expect(M10_WRITTEN_KEYS).toEqual([
+      "winback_eligibility",
+      "winback_tier",
+      "customer_behavior_profile",
+      "customer_intelligence_summary",
+    ]);
     expect(WORKFLOW_OWNED_KEYS).toEqual(["winback_cycle_status", "winback_cycle_started_at"]);
     expect(M06_HASH_EXCLUDED_KEYS).toEqual(["metrics_hash", "m06_intelligence_updated_at"]);
   });

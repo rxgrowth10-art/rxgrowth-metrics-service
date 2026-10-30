@@ -1,3 +1,5 @@
+export { behaviorProfile, EXPLORER_MIN_CATEGORIES, FREQUENT_MIN_ORDERS, ROUTINE_MIN_ORDERS } from "./behavior.js";
+export type { BehaviorProfileInput } from "./behavior.js";
 export { collectCollectionIds, rankCategories } from "./categories.js";
 export type { CategoryRanking } from "./categories.js";
 export { classifyOrderSource, orderCheckoutMethod, orderLocationName, rankChannels } from "./channels.js";
@@ -16,6 +18,8 @@ export { summarizeValue } from "./ltv.js";
 export { isQualifyingOrder } from "./qualifying.js";
 export { recencyBucket } from "./recency.js";
 export { mean, median, round2 } from "./round.js";
+export { intelligenceSummary } from "./summary.js";
+export type { IntelligenceSummaryInput } from "./summary.js";
 export { calculateTrend } from "./trends.js";
 export type { CustomerMetrics, MetricOrder, OrderDetailSummary, OrderLine, Trend } from "./types.js";
 export {

@@ -51,7 +51,12 @@ const M06_WRITTEN_KEYS = [
   "m06_intelligence_updated_at",
 ];
 
-const M10_WRITTEN_KEYS = ["winback_eligibility", "winback_tier"];
+const M10_WRITTEN_KEYS = [
+  "winback_eligibility",
+  "winback_tier",
+  "customer_behavior_profile",
+  "customer_intelligence_summary",
+];
 
 const WORKFLOW_OWNED_KEYS = ["winback_cycle_status", "winback_cycle_started_at"];
 

@@ -37,8 +37,8 @@ export const FIELDS: readonly FieldDefinition[] = [
   { key: "birthday_reward_expires_at", fieldKey: "contact.birthday_reward_expires_at", name: "Birthday Coupon Expires At", dataType: "DATE", testLabId: "39UFwWv1FuuuhMXkVgYA", writer: "external" },
   { key: "birthday_reward_started_at", fieldKey: "contact.birthday_reward_started_at", name: "Birthday Coupon Started At", dataType: "DATE", testLabId: "ESTe8SI2Kl7z09J8xEdG", writer: "external" },
   { key: "category_diversity", fieldKey: "contact.category_diversity", name: "Category Diversity", dataType: "NUMERICAL", testLabId: "z2Oh1r3BEouLFOFInXeX", writer: "m06" },
-  { key: "customer_behavior_profile", fieldKey: "contact.customer_behavior_profile", name: "Customer Behavior Profile", dataType: "SINGLE_OPTIONS", testLabId: "mCVlT3ws2Qds8fHE14c5", writer: "external", picklistOptions: ["Routine Buyer", "Frequent Buyer", "High Value Buyer", "Explorer", "Deal Sensitive", "Occasional Buyer", "At Risk", "Lapsed"] },
-  { key: "customer_intelligence_summary", fieldKey: "contact.customer_intelligence_summary", name: "Customer Intelligence Summary", dataType: "LARGE_TEXT", testLabId: "jxWj7QJxQf8e5UbzT5Jt", writer: "external" },
+  { key: "customer_behavior_profile", fieldKey: "contact.customer_behavior_profile", name: "Customer Behavior Profile", dataType: "SINGLE_OPTIONS", testLabId: "mCVlT3ws2Qds8fHE14c5", writer: "m10", picklistOptions: ["Routine Buyer", "Frequent Buyer", "High Value Buyer", "Explorer", "Deal Sensitive", "Occasional Buyer", "At Risk", "Lapsed"] },
+  { key: "customer_intelligence_summary", fieldKey: "contact.customer_intelligence_summary", name: "Customer Intelligence Summary", dataType: "LARGE_TEXT", testLabId: "jxWj7QJxQf8e5UbzT5Jt", writer: "m10" },
   { key: "customer_notes", fieldKey: "contact.customer_notes", name: "Customer Notes", dataType: "LARGE_TEXT", testLabId: "4cKHXZ4JIdlP13NSK266", writer: "external" },
   { key: "customer_status", fieldKey: "contact.customer_status", name: "Customer Status", dataType: "SINGLE_OPTIONS", testLabId: "w0GkrrD8BAl3kEGI4Pw2", writer: "m06", picklistOptions: ["New", "Active", "At Risk", "Lapsed", "Lost"] },
   { key: "customer_type", fieldKey: "contact.customer_type", name: "Customer Type", dataType: "SINGLE_OPTIONS", testLabId: "N6TlGrWlLJSegOIxsDEe", writer: "m06", picklistOptions: ["Lead", "Customer", "VIP", "Lapsed Customer"] },
@@ -176,6 +176,8 @@ export const M06_WRITTEN_KEYS = [
 export const M10_WRITTEN_KEYS = [
   "winback_eligibility",
   "winback_tier",
+  "customer_behavior_profile",
+  "customer_intelligence_summary",
 ] as const;
 
 export const WORKFLOW_OWNED_KEYS = [
