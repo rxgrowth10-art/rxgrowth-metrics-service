@@ -115,7 +115,7 @@ async function writeWithIds(
   });
   const valueFields = valueFieldValues(metrics, args.valueDistribution ?? null);
   const formatted = valueFields ? { ...formatM06Values(metrics), ...valueFields } : formatM06Values(metrics);
-  const values = hashedValues(
+  const values = includedM06Values(
     formatted,
     args.orderDetailsComplete !== false,
     args.categoriesResolved !== false,
@@ -147,7 +147,12 @@ async function writeWithIds(
   return { written: true, hash, reason: "updated" };
 }
 
-function hashedValues(
+/**
+ * Keys that enter `metrics_hash` and the contact update.
+ * Incomplete order details, a failed collection refresh, or a missing
+ * distribution leave their keys out of both.
+ */
+export function includedM06Values(
   values: Record<string, string>,
   orderDetailsComplete: boolean,
   categoriesResolved: boolean,

@@ -19,6 +19,7 @@ import {
   valueSampleFromContact,
   writeValueBuild,
 } from "./distribution.js";
+import { nightlyProfile, profileFieldWrites } from "./profile.js";
 import { reconcileRecentOrders } from "./reconcile.js";
 
 /** Longer than the 300s function limit so a second run cannot overlap a live hop. */
@@ -222,6 +223,8 @@ async function runTenant(
   const ids = await loadFieldIdMap(client, deps.idempotency, tenant.locationId);
   requireFieldId(ids, "winback_eligibility");
   requireFieldId(ids, "winback_tier");
+  requireFieldId(ids, "customer_behavior_profile");
+  requireFieldId(ids, "customer_intelligence_summary");
   const started = deps.now().getTime();
   const budget = deps.budgetMs ?? DEFAULT_BUDGET_MS;
   const fresh = new Map<string, Record<string, string>>();
@@ -304,31 +307,56 @@ async function processContact(
   fresh: ReadonlyMap<string, Record<string, string>>,
 ): Promise<void> {
   summary.contacts += 1;
+  const profile = nightlyProfile({
+    contact,
+    ids,
+    restaurantName: tenant.name,
+    currency: tenant.currency,
+    fresh: fresh.get(contact.id),
+  });
+  const profileFields = profileFieldWrites(contact, ids, profile);
   if (readContactField(contact, "winback_cycle_status", ids) === "In Progress") {
     summary.skippedInProgress += 1;
+    await writeChanged(client, contact.id, profileFields, summary);
     return;
   }
   const view = withFreshMetrics(contact, fresh.get(contact.id), ids);
   const decision = decisionFromContact(view, ids, tenant.timezone, deps.now());
   if (!decision) {
     summary.skippedNoOrders += 1;
+    await writeChanged(client, contact.id, profileFields, summary);
     return;
   }
   const currentEligibility = readContactField(contact, "winback_eligibility", ids);
   const currentTier = readContactField(contact, "winback_tier", ids);
   await syncEnrollment(client, tenant, contact.id, decision, deps, summary);
-  if (currentEligibility === decision.eligibility && currentTier === decision.tier) {
+  const fields: Array<{ id: string; key: string; value: string }> = [...profileFields];
+  if (currentEligibility !== decision.eligibility || currentTier !== decision.tier) {
+    fields.push(
+      {
+        id: requireFieldId(ids, "winback_eligibility"),
+        key: "winback_eligibility",
+        value: decision.eligibility,
+      },
+      { id: requireFieldId(ids, "winback_tier"), key: "winback_tier", value: decision.tier },
+    );
+  }
+  if (fields.length === 0) {
     summary.skippedUnchanged += 1;
     return;
   }
-  await client.updateContact(contact.id, [
-    {
-      id: requireFieldId(ids, "winback_eligibility"),
-      key: "winback_eligibility",
-      value: decision.eligibility,
-    },
-    { id: requireFieldId(ids, "winback_tier"), key: "winback_tier", value: decision.tier },
-  ]);
+  await client.updateContact(contact.id, fields);
+  summary.written += 1;
+}
+
+async function writeChanged(
+  client: GhlClient,
+  contactId: string,
+  fields: ReadonlyArray<{ id: string; key: string; value: string }>,
+  summary: M10Summary,
+): Promise<void> {
+  if (fields.length === 0) return;
+  await client.updateContact(contactId, [...fields]);
   summary.written += 1;
 }
 

@@ -525,7 +525,12 @@ describe("webhook summary pass", () => {
     expect(updates[0]?.purchase_consistency).toBe("Highly Consistent");
     expect(updates[0]?.lifetime_value).toBe("100.00");
     expect(updates[0]?.last_order_type).toBe("Delivery");
-    expect(M10_WRITTEN_KEYS).toEqual(["winback_eligibility", "winback_tier"]);
+    expect(M10_WRITTEN_KEYS).toEqual([
+      "winback_eligibility",
+      "winback_tier",
+      "customer_behavior_profile",
+      "customer_intelligence_summary",
+    ]);
     expect(M06_WRITTEN_KEYS).toContain("favorite_item");
     expect(M06_WRITTEN_KEYS).toContain("top_items");
     expect(M06_WRITTEN_KEYS).not.toContain("last_coupon_code");
