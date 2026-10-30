@@ -1,3 +1,4 @@
+import { loadValueDistribution } from "../cron/distribution.js";
 import { loadCollectionNames } from "../ghl/collections.js";
 import type { GhlClient, GhlOrder } from "../ghl/index.js";
 import { ORDER_DETAIL_CONCURRENCY, hydrateOrders } from "../ghl/hydrate-orders.js";
@@ -11,6 +12,7 @@ import {
   computeM06,
   contactOrderSummaries,
   isQualifyingOrder,
+  valueFieldValues,
   type OrderDetailSummary,
 } from "../metrics/index.js";
 import { formatM06Values } from "./format.js";
@@ -98,9 +100,10 @@ export async function recomputeM06Contact(args: {
           locationId: args.locationId,
           ids: collectionIds,
         });
-  const values = formatM06Values(
-    computeM06(orders, args.timeZone, args.now, { collectionNames: collections.names }),
-  );
+  const metrics = computeM06(orders, args.timeZone, args.now, { collectionNames: collections.names });
+  const valueDistribution = await loadValueDistribution(args.idempotency, args.locationId);
+  const valueFields = valueFieldValues(metrics, valueDistribution);
+  const values = valueFields ? { ...formatM06Values(metrics), ...valueFields } : formatM06Values(metrics);
   const result = await writeM06Metrics({
     client: args.client,
     contactId: args.contactId,
@@ -111,6 +114,7 @@ export async function recomputeM06Contact(args: {
     orderDetailsComplete,
     collectionNames: collections.names,
     categoriesResolved: collections.ok,
+    valueDistribution,
   });
   return { written: result.written, values, orders, summaries, incomplete };
 }

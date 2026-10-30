@@ -1,10 +1,17 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../../api/cron/m10.js";
+import {
+  VALUE_DISTRIBUTION_BUILD_TTL_SECONDS,
+  VALUE_DISTRIBUTION_TTL_SECONDS,
+  valueDistributionBuildKey,
+  valueDistributionKey,
+} from "../../src/cron/distribution.js";
 import { handleM10Cron, handleM10Tenant, runM10Tenant, type M10Deps } from "../../src/cron/m10.js";
 import type { CustomFieldWrite, GhlClient, GhlContact } from "../../src/ghl/index.js";
 import { parseContactPage } from "../../src/ghl/parse.js";
 import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
+import { parseValueDistribution } from "../../src/metrics/value.js";
 import { FIELDS } from "../../src/schema/fields.js";
 import { encryptApiKey, MemoryTenantStore, parseEncryptionKey, type Tenant } from "../../src/tenants/index.js";
 
@@ -582,6 +589,224 @@ describe("M10 win-back cron", () => {
     expect(seen).toEqual([null, ["page-2"], ["page-3"]]);
     expect(await run.deps.idempotency.get("m10cursor:loc_1:2026-06-22")).toBeNull();
     expect((await handleM10Tenant(tenantRequest("loc_1"), run.deps)).status).toBe(401);
+  });
+
+  it("stores one distribution per active tenant and does not scan inactive tenants", async () => {
+    const run = harness();
+    const searches = new Map<string, number>();
+    const orderFetches = new Map<string, number>();
+    const sets: Array<{ key: string; ttl: number }> = [];
+    const set = run.deps.idempotency.set.bind(run.deps.idempotency);
+    run.deps.idempotency.set = async (key, value, ttlSeconds) => {
+      sets.push({ key, ttl: ttlSeconds });
+      await set(key, value, ttlSeconds);
+    };
+    const population: Record<string, GhlContact[]> = {
+      loc_1: [
+        contact("a", {
+          qualifying_order_count: "1",
+          lifetime_value: "10.00",
+          last_order_date: "2026-06-20",
+          purchase_consistency: "Sporadic",
+        }),
+        contact("b", {
+          qualifying_order_count: "4",
+          lifetime_value: "40.00",
+          last_order_date: "2026-06-01",
+          purchase_consistency: "Highly Consistent",
+        }),
+      ],
+      loc_2: [
+        contact("c", {
+          qualifying_order_count: "2",
+          lifetime_value: "500.00",
+          last_order_date: "2026-01-01",
+          purchase_consistency: "Variable",
+        }),
+      ],
+    };
+    run.deps.ghlFactory = ({ locationId }) => {
+      const people = population[locationId] ?? [];
+      return {
+        async listOrders() {
+          orderFetches.set(locationId, (orderFetches.get(locationId) ?? 0) + 1);
+          throw new Error("distribution must not list orders");
+        },
+        async listLocationOrdersPage() {
+          return { orders: [], totalCount: 0 };
+        },
+        async getOrder() {
+          orderFetches.set(locationId, (orderFetches.get(locationId) ?? 0) + 1);
+          throw new Error("distribution must not fetch an order");
+        },
+        async getContact() {
+          orderFetches.set(locationId, (orderFetches.get(locationId) ?? 0) + 1);
+          throw new Error("distribution must not fetch a contact");
+        },
+        async listCustomFields() {
+          return FIELDS.map((field) => ({
+            id: field.testLabId,
+            fieldKey: field.fieldKey,
+            name: field.name,
+            dataType: field.dataType,
+          }));
+        },
+        async updateContact() {
+          return undefined;
+        },
+        async searchContacts() {
+          orderFetches.set(locationId, (orderFetches.get(locationId) ?? 0) + 1);
+          throw new Error("distribution must page the scan M10 already runs");
+        },
+        async searchContactsPage() {
+          searches.set(locationId, (searches.get(locationId) ?? 0) + 1);
+          return { contacts: people, searchAfter: null };
+        },
+        async listCollections() {
+          return [];
+        },
+        async addContactToWorkflow() {
+          return undefined;
+        },
+      };
+    };
+    await run.tenants.upsert(tenant());
+    await run.tenants.upsert(tenant({ locationId: "loc_2", name: "Second" }));
+    await run.tenants.upsert(tenant({ locationId: "loc_off", name: "Paused", active: false }));
+
+    const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+    expect(response.status).toBe(200);
+    const first = parseValueDistribution((await run.deps.idempotency.get(valueDistributionKey("loc_1"))) ?? "");
+    const second = parseValueDistribution((await run.deps.idempotency.get(valueDistributionKey("loc_2"))) ?? "");
+    expect(first?.spend).toEqual([10, 40]);
+    expect(first?.orders).toEqual([1, 4]);
+    expect(first?.scores).toHaveLength(2);
+    expect(second?.spend).toEqual([500]);
+    expect(second?.orders).toEqual([2]);
+    expect(second?.scores).toHaveLength(1);
+    expect(JSON.stringify(first)).not.toContain("500");
+    expect(JSON.stringify(second)).not.toContain("40");
+    expect(await run.deps.idempotency.get(valueDistributionKey("loc_off"))).toBeNull();
+    expect(searches.get("loc_off")).toBeUndefined();
+    expect(searches.get("loc_1")).toBe(1);
+    expect(searches.get("loc_2")).toBe(1);
+    expect(orderFetches.size).toBe(0);
+    const published = sets.filter((entry) => entry.key.startsWith("m10:dist:"));
+    expect(published.map((entry) => entry.key).sort()).toEqual(["m10:dist:loc_1", "m10:dist:loc_2"]);
+    expect(published.every((entry) => entry.ttl === VALUE_DISTRIBUTION_TTL_SECONDS)).toBe(true);
+    expect(sets.some((entry) => entry.key.startsWith("m10:dist-build:"))).toBe(false);
+
+    const skipped = await handleM10Tenant(tenantRequest("loc_off", "Bearer cron-secret"), run.deps);
+    expect(skipped.status).toBe(200);
+    expect(await skipped.json()).toMatchObject({ ok: true, tenants: 0, contacts: 0 });
+    expect(searches.get("loc_off")).toBeUndefined();
+    expect(await run.deps.idempotency.get(valueDistributionKey("loc_off"))).toBeNull();
+  });
+
+  it("publishes the combined distribution only when the contact scan finishes", async () => {
+    const seen: Array<readonly unknown[] | null> = [];
+    const pages = [
+      {
+        contacts: [
+          contact("a", {
+            qualifying_order_count: "2",
+            lifetime_value: "10.00",
+            last_order_date: "2026-06-20",
+            purchase_consistency: "Variable",
+          }),
+        ],
+        searchAfter: ["page-2"] as unknown[] | null,
+      },
+      {
+        contacts: [
+          contact("b", {
+            qualifying_order_count: "5",
+            lifetime_value: "80.00",
+            last_order_date: "2026-06-01",
+            purchase_consistency: "Highly Consistent",
+          }),
+        ],
+        searchAfter: null,
+      },
+    ];
+    const run = harness();
+    run.deps.budgetMs = 0;
+    const sets: Array<{ key: string; ttl: number }> = [];
+    const set = run.deps.idempotency.set.bind(run.deps.idempotency);
+    run.deps.idempotency.set = async (key, value, ttlSeconds) => {
+      sets.push({ key, ttl: ttlSeconds });
+      await set(key, value, ttlSeconds);
+    };
+    run.deps.ghlFactory = () => pagingClient(pages, seen);
+    await run.tenants.upsert(tenant());
+
+    const first = await runM10Tenant(run.deps, tenant());
+    expect(first.continue).toBe(true);
+    expect(await run.deps.idempotency.get(valueDistributionKey("loc_1"))).toBeNull();
+    expect(sets.filter((entry) => entry.key === valueDistributionBuildKey("loc_1", "2026-06-22"))).toEqual([
+      { key: valueDistributionBuildKey("loc_1", "2026-06-22"), ttl: VALUE_DISTRIBUTION_BUILD_TTL_SECONDS },
+    ]);
+
+    const finished = await runM10Tenant(run.deps, tenant());
+    expect(finished.continue).toBe(false);
+    expect(seen).toEqual([null, ["page-2"]]);
+    const stored = parseValueDistribution((await run.deps.idempotency.get(valueDistributionKey("loc_1"))) ?? "");
+    expect(stored?.spend).toEqual([10, 80]);
+    expect(stored?.orders).toEqual([2, 5]);
+    expect(stored?.scores).toHaveLength(2);
+    expect(await run.deps.idempotency.get(valueDistributionBuildKey("loc_1", "2026-06-22"))).toBeNull();
+  });
+
+  it("does not publish a partial population when a resumed scan has no saved samples", async () => {
+    const seen: Array<readonly unknown[] | null> = [];
+    const pages = [
+      {
+        contacts: [
+          contact("early", {
+            qualifying_order_count: "3",
+            lifetime_value: "15.00",
+            last_order_date: "2026-06-20",
+            purchase_consistency: "Consistent",
+          }),
+        ],
+        searchAfter: ["page-2"] as unknown[] | null,
+      },
+      {
+        contacts: [
+          contact("late", {
+            qualifying_order_count: "9",
+            lifetime_value: "999.00",
+            last_order_date: "2026-06-21",
+            purchase_consistency: "Highly Consistent",
+          }),
+        ],
+        searchAfter: null,
+      },
+    ];
+    const run = harness();
+    run.deps.ghlFactory = () => pagingClient(pages, seen);
+    await run.tenants.upsert(tenant());
+    await run.deps.idempotency.set("m10cursor:loc_1:2026-06-22", JSON.stringify(["page-2"]), 7200);
+
+    const result = await runM10Tenant(run.deps, tenant());
+    expect(result.continue).toBe(false);
+    expect(seen).toEqual([["page-2"]]);
+    expect(await run.deps.idempotency.get(valueDistributionKey("loc_1"))).toBeNull();
+    expect(await run.deps.idempotency.get(valueDistributionBuildKey("loc_1", "2026-06-22"))).toBeNull();
+  });
+
+  it("does not publish a distribution when the contact scan fails", async () => {
+    const run = harness({ failSearch: true, contacts: [contact("a", { qualifying_order_count: "2", lifetime_value: "10.00" })] });
+    await run.tenants.upsert(tenant());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await handleM10Cron(cronRequest("Bearer cron-secret"), run.deps);
+      expect(response.status).toBe(200);
+      expect(await run.deps.idempotency.get(valueDistributionKey("loc_1"))).toBeNull();
+      expect(await run.deps.idempotency.get(valueDistributionBuildKey("loc_1", "2026-06-22"))).toBeNull();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

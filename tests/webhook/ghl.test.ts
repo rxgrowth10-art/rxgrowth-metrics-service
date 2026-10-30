@@ -6,6 +6,7 @@ import type { GhlClient } from "../../src/ghl/index.js";
 import { MemoryOrderSummaryCache } from "../../src/ghl/order-summary-cache.js";
 import { orderBackfillKey } from "../../src/ghl/order-summary.js";
 import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
+import { M06_VALUE_FIELD_KEYS } from "../../src/metrics/value.js";
 import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
 import { hashWebhookToken } from "../../src/http/webhook-token.js";
 import { encryptApiKey, MemoryTenantStore, parseEncryptionKey, type Tenant } from "../../src/tenants/index.js";
@@ -150,7 +151,11 @@ describe("GHL webhook", () => {
     expect(await second.json()).toEqual({ accepted: true, written: false });
     expect(harness.listCalls()).toBe(2);
     expect(harness.seenKeys).toEqual(["loc1:pit-plaintext", "loc1:pit-plaintext"]);
-    expect(Object.keys(harness.updates[0] ?? {})).toEqual([...M06_WRITTEN_KEYS]);
+    expect(Object.keys(harness.updates[0] ?? {})).toEqual(
+      M06_WRITTEN_KEYS.filter((key) => !new Set<string>(M06_VALUE_FIELD_KEYS).has(key)),
+    );
+    expect(harness.updates[0]?.customer_value_score).toBeUndefined();
+    expect(harness.updates[0]?.vip_status).toBeUndefined();
     expect(harness.updates[0]?.lifetime_value).toBe("15.00");
     expect(harness.updates[0]?.total_orders).toBe("1");
     expect(harness.updates[0]?.last_order_type).toBe("Delivery");

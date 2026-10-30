@@ -1,6 +1,7 @@
 import type { GhlClient } from "../ghl/index.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
 import { computeM06, type MetricOrder } from "../metrics/index.js";
+import { M06_VALUE_FIELD_KEYS, valueFieldValues, type ValueDistribution } from "../metrics/value.js";
 import { M06_WRITTEN_KEYS } from "../schema/fields.js";
 import { businessDateString } from "../time/business-date.js";
 import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap, refreshFieldIdMap } from "./field-cache.js";
@@ -31,7 +32,18 @@ export const M06_DETAIL_FIELD_KEYS = [
 
 const DETAIL_KEYS = new Set<string>(M06_DETAIL_FIELD_KEYS);
 const CATEGORY_KEYS = new Set<string>(M06_CATEGORY_FIELD_KEYS);
-const BLANK_OMIT = new Set(["last_order_type", "preferred_order_type", "primary_order_source"]);
+const VALUE_KEYS = new Set<string>(M06_VALUE_FIELD_KEYS);
+/**
+ * Blank picklists stay in the hash as "" and are left off the contact update.
+ * Percentile numbers are written as "" when the contact has no qualifying orders.
+ */
+const BLANK_OMIT = new Set([
+  "last_order_type",
+  "preferred_order_type",
+  "primary_order_source",
+  "vip_classification",
+  "vip_status",
+]);
 
 export interface WriteM06Result {
   written: boolean;
@@ -59,6 +71,11 @@ export async function writeM06Metrics(args: {
    * stay off the contact and out of the hash. Defaults to true.
    */
   categoriesResolved?: boolean;
+  /**
+   * Previous night's distribution. Null or omitted leaves the percentile and
+   * VIP keys off the contact and out of the hash.
+   */
+  valueDistribution?: ValueDistribution | null;
 }): Promise<WriteM06Result> {
   try {
     const ids = await resolveFieldIds(args);
@@ -89,16 +106,20 @@ async function writeWithIds(
     orderDetailsComplete?: boolean;
     collectionNames?: ReadonlyMap<string, string | null>;
     categoriesResolved?: boolean;
+    valueDistribution?: ValueDistribution | null;
   },
   ids: ReadonlyMap<string, string>,
 ): Promise<WriteM06Result> {
   const metrics = computeM06(args.orders, args.timeZone, args.now, {
     collectionNames: args.collectionNames,
   });
+  const valueFields = valueFieldValues(metrics, args.valueDistribution ?? null);
+  const formatted = valueFields ? { ...formatM06Values(metrics), ...valueFields } : formatM06Values(metrics);
   const values = hashedValues(
-    formatM06Values(metrics),
+    formatted,
     args.orderDetailsComplete !== false,
     args.categoriesResolved !== false,
+    valueFields !== null,
   );
   const hash = metricsHash(values);
   const contact = await args.client.getContact(args.contactId);
@@ -130,12 +151,14 @@ function hashedValues(
   values: Record<string, string>,
   orderDetailsComplete: boolean,
   categoriesResolved: boolean,
+  valueDistributionReady: boolean,
 ): Record<string, string> {
-  if (orderDetailsComplete && categoriesResolved) return values;
+  if (orderDetailsComplete && categoriesResolved && valueDistributionReady) return values;
   const hashed: Record<string, string> = {};
   for (const [key, value] of Object.entries(values)) {
     if (!orderDetailsComplete && DETAIL_KEYS.has(key)) continue;
     if (!categoriesResolved && CATEGORY_KEYS.has(key)) continue;
+    if (!valueDistributionReady && VALUE_KEYS.has(key)) continue;
     hashed[key] = value;
   }
   return hashed;

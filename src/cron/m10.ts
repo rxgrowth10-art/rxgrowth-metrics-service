@@ -4,12 +4,21 @@ import { bearerMatches } from "../http/auth.js";
 import { json } from "../http/json.js";
 import type { IdempotencyStore } from "../idempotency/index.js";
 import { log } from "../log/logger.js";
+import type { ValueSample } from "../metrics/value.js";
 import { evaluateWinback, type WinbackDecision } from "../metrics/winback.js";
 import type { Tenant, TenantStore } from "../tenants/index.js";
 import { decryptApiKey } from "../tenants/index.js";
 import { businessDateString, calendarDayDifference, parseStoredDate } from "../time/business-date.js";
 import { invalidateFieldCache, isUnknownFieldError, loadFieldIdMap } from "../writeback/field-cache.js";
 import { readContactField, requireFieldId } from "../writeback/fields.js";
+import {
+  clearValueBuild,
+  publishValueDistribution,
+  readValueBuild,
+  valueDistributionBuildKey,
+  valueSampleFromContact,
+  writeValueBuild,
+} from "./distribution.js";
 import { reconcileRecentOrders } from "./reconcile.js";
 
 /** Longer than the 300s function limit so a second run cannot overlap a live hop. */
@@ -191,6 +200,7 @@ export async function runM10Tenant(deps: M10Deps, tenant: Tenant): Promise<M10Te
     summary.errors += 1;
     resume = false;
     await deps.idempotency.del(cursorKey(tenant.locationId, day));
+    await deps.idempotency.del(valueDistributionBuildKey(tenant.locationId, day));
     if (isUnknownFieldError(error)) await invalidateFieldCache(deps.idempotency, tenant.locationId);
     log("error", "m10.tenant_failed", {
       locationId: tenant.locationId,
@@ -229,25 +239,52 @@ async function runTenant(
   });
   if (reconcileAgain) return true;
   let cursor = await readCursor(deps, tenant.locationId, day);
+  const resumed = cursor !== null;
+  const build = cursor ? await readValueBuild(deps.idempotency, tenant.locationId, day) : null;
+  const trusted = cursor === null || (build !== null && sameCursor(build.searchAfter, cursor));
+  const prior = trusted && build ? build.samples : [];
+  const pending: ValueSample[] = [];
+  let wroteBuild = false;
+  const samples = () => prior.concat(pending);
+  const pause = async (nextCursor: unknown[]): Promise<void> => {
+    if (trusted) {
+      await writeValueBuild(deps.idempotency, tenant.locationId, day, nextCursor, samples());
+      wroteBuild = true;
+    }
+    await deps.idempotency.set(cursorKey(tenant.locationId, day), JSON.stringify(nextCursor), CURSOR_TTL_SECONDS);
+  };
+  const finish = async (): Promise<void> => {
+    if (trusted) await publishValueDistribution(deps.idempotency, tenant.locationId, samples());
+    else log("warn", "m10.distribution_skipped", { locationId: tenant.locationId });
+    if (resumed || wroteBuild) await clearValueBuild(deps.idempotency, tenant.locationId, day);
+    await deps.idempotency.del(cursorKey(tenant.locationId, day));
+  };
   for (let page = 0; page < MAX_INLINE_HOPS; page += 1) {
     const batch = await client.searchContactsPage(cursor);
     for (const contact of batch.contacts) {
       await processContact(client, tenant, deps, summary, ids, contact, fresh);
+      if (!trusted) continue;
+      const sample = valueSampleFromContact(contact, ids, tenant.timezone, deps.now());
+      if (sample) pending.push(sample);
     }
     const next = batch.searchAfter;
-    const stuck = cursor !== null && next !== null && JSON.stringify(cursor) === JSON.stringify(next);
+    const stuck = cursor !== null && next !== null && sameCursor(cursor, next);
     if (!next || next.length === 0 || stuck) {
-      await deps.idempotency.del(cursorKey(tenant.locationId, day));
+      await finish();
       return false;
     }
     if (deps.now().getTime() - started >= budget) {
-      await deps.idempotency.set(cursorKey(tenant.locationId, day), JSON.stringify(next), CURSOR_TTL_SECONDS);
+      await pause(next);
       return true;
     }
     cursor = next;
   }
-  await deps.idempotency.set(cursorKey(tenant.locationId, day), JSON.stringify(cursor), CURSOR_TTL_SECONDS);
+  if (cursor) await pause(cursor);
   return true;
+}
+
+function sameCursor(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 const FRESH_METRIC_KEYS = [
