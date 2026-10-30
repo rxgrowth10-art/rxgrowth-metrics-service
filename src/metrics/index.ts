@@ -21,6 +21,7 @@ export type { CustomerMetrics, MetricOrder, OrderDetailSummary, OrderLine, Trend
 export {
   buildValueDistribution,
   consistencyScore,
+  EMERGING_VIP_MIN_SCORE,
   customerValueScore,
   isVip,
   M06_VALUE_FIELD_KEYS,

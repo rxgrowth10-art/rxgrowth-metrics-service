@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeM06 } from "../../src/metrics/compute.js";
 import {
   CONSISTENCY_WEIGHT,
+  EMERGING_VIP_MIN_SCORE,
   FREQUENCY_WEIGHT,
   RECENCY_WEIGHT,
   SPEND_WEIGHT,
@@ -112,16 +113,62 @@ describe("VIP cut", () => {
     expect(isVip(100, distribution)).toBe(true);
   });
 
-  it("labels a VIP from spend and frequency, and leaves everyone else Not VIP", () => {
-    expect(vipClassification({ vip: false, spendPercentile: 99, frequencyPercentile: 99 })).toBe("Not VIP");
-    expect(vipClassification({ vip: true, spendPercentile: 90, frequencyPercentile: 90 })).toBe(
+  it("labels spend and frequency leaders without the Emerging VIP gates", () => {
+    const quiet = { score: 10, orderFrequencyTrend: "Stable", customerStatus: "Lapsed" };
+    expect(vipClassification({ vip: false, spendPercentile: 99, frequencyPercentile: 99, ...quiet })).toBe("Not VIP");
+    expect(vipClassification({ vip: true, spendPercentile: 90, frequencyPercentile: 90, ...quiet })).toBe(
       "High Value & High Frequency",
     );
-    expect(vipClassification({ vip: true, spendPercentile: 90, frequencyPercentile: 89.99 })).toBe("Spend Leader");
-    expect(vipClassification({ vip: true, spendPercentile: 89.99, frequencyPercentile: 95 })).toBe("Frequency Leader");
-    expect(vipClassification({ vip: true, spendPercentile: 70, frequencyPercentile: 70 })).toBe("Emerging VIP");
+    expect(vipClassification({ vip: true, spendPercentile: 90, frequencyPercentile: 89.99, ...quiet })).toBe(
+      "Spend Leader",
+    );
+    expect(vipClassification({ vip: true, spendPercentile: 89.99, frequencyPercentile: 95, ...quiet })).toBe(
+      "Frequency Leader",
+    );
+  });
+
+  it("requires a value score of at least 65 for Emerging VIP", () => {
+    expect(EMERGING_VIP_MIN_SCORE).toBe(65);
+    const emerging = emergingVip();
+    expect(vipClassification({ ...emerging, score: 65 })).toBe("Emerging VIP");
+    expect(vipClassification({ ...emerging, score: 64.99 })).toBe("Not VIP");
+  });
+
+  it("requires an Increasing order-frequency trend for Emerging VIP", () => {
+    const emerging = emergingVip();
+    expect(vipClassification({ ...emerging, orderFrequencyTrend: "Increasing" })).toBe("Emerging VIP");
+    expect(vipClassification({ ...emerging, orderFrequencyTrend: "Stable" })).toBe("Not VIP");
+    expect(vipClassification({ ...emerging, orderFrequencyTrend: "Decreasing" })).toBe("Not VIP");
+    expect(vipClassification({ ...emerging, orderFrequencyTrend: "Insufficient Data" })).toBe("Not VIP");
+  });
+
+  it("requires customer status Active or New for Emerging VIP", () => {
+    const emerging = emergingVip();
+    expect(vipClassification({ ...emerging, customerStatus: "Active" })).toBe("Emerging VIP");
+    expect(vipClassification({ ...emerging, customerStatus: "New" })).toBe("Emerging VIP");
+    expect(vipClassification({ ...emerging, customerStatus: "At Risk" })).toBe("Not VIP");
+    expect(vipClassification({ ...emerging, customerStatus: "Lapsed" })).toBe("Not VIP");
+    expect(vipClassification({ ...emerging, customerStatus: "Lost" })).toBe("Not VIP");
   });
 });
+
+function emergingVip(): {
+  vip: boolean;
+  spendPercentile: number;
+  frequencyPercentile: number;
+  score: number;
+  orderFrequencyTrend: string;
+  customerStatus: string;
+} {
+  return {
+    vip: true,
+    spendPercentile: 70,
+    frequencyPercentile: 70,
+    score: 80,
+    orderFrequencyTrend: "Increasing",
+    customerStatus: "Active",
+  };
+}
 
 describe("value fields from a stored distribution", () => {
   it("returns null when the distribution is missing and blanks a contact with no orders", () => {
@@ -167,6 +214,34 @@ describe("value fields from a stored distribution", () => {
       order_frequency_percentile: "0.00",
       customer_value_score: "60.00",
       vip_classification: "Spend Leader",
+      vip_status: "VIP",
+    });
+  });
+
+  it("writes Emerging VIP when the score, order-frequency trend, and status all pass", () => {
+    const metrics = computeM06(
+      [
+        order({ id: "o1", amount: 40, createdAt: "2025-12-01T12:00:00.000Z" }),
+        order({ id: "o2", amount: 40, createdAt: "2025-12-21T12:00:00.000Z" }),
+        order({ id: "o3", amount: 40, createdAt: "2026-01-10T12:00:00.000Z" }),
+      ],
+      "UTC",
+      NOW,
+    );
+    expect(metrics.customerStatus).toBe("Active");
+    expect(metrics.orderFrequencyTrend).toBe("Increasing");
+    expect(metrics.purchaseConsistency).toBe("Highly Consistent");
+    const distribution = {
+      spend: [10, 10, 10, 10, 20, 20, 50, 120, 500, 900],
+      orders: [1, 1, 1, 2, 2, 3, 8, 8, 8, 8],
+      scores: repeat(10, 0),
+    };
+    const fields = valueFieldValues(metrics, distribution);
+    expect(fields).toMatchObject({
+      lifetime_spend_percentile: "77.78",
+      order_frequency_percentile: "55.56",
+      customer_value_score: "80.00",
+      vip_classification: "Emerging VIP",
       vip_status: "VIP",
     });
   });

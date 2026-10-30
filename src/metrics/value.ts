@@ -13,6 +13,9 @@ export const VIP_PERCENTILE = 90;
 /** Fewer ranked customers than this, and nobody is VIP. */
 export const VIP_MIN_CUSTOMERS = 10;
 
+/** Emerging VIP also needs a value score at or above this. */
+export const EMERGING_VIP_MIN_SCORE = 65;
+
 export const M06_VALUE_FIELD_KEYS = [
   "lifetime_spend_percentile",
   "order_frequency_percentile",
@@ -120,12 +123,17 @@ export function isVip(score: number, distribution: ValueDistribution): boolean {
 
 /**
  * Subtype for a contact who already cleared the value-score VIP cut.
- * Not VIP stays Not VIP, including when the location has fewer than 10 customers.
+ * Emerging VIP also needs a score of at least 65, an Increasing
+ * order-frequency trend, and customer status Active or New.
+ * Anyone else who is not a spend or frequency leader is Not VIP.
  */
 export function vipClassification(args: {
   vip: boolean;
   spendPercentile: number;
   frequencyPercentile: number;
+  score: number;
+  orderFrequencyTrend: string;
+  customerStatus: string;
 }): string {
   if (!args.vip) return "Not VIP";
   const spend = args.spendPercentile >= VIP_PERCENTILE;
@@ -133,7 +141,20 @@ export function vipClassification(args: {
   if (spend && frequency) return "High Value & High Frequency";
   if (spend) return "Spend Leader";
   if (frequency) return "Frequency Leader";
-  return "Emerging VIP";
+  if (isEmergingVip(args)) return "Emerging VIP";
+  return "Not VIP";
+}
+
+function isEmergingVip(args: {
+  score: number;
+  orderFrequencyTrend: string;
+  customerStatus: string;
+}): boolean {
+  return (
+    args.score >= EMERGING_VIP_MIN_SCORE &&
+    args.orderFrequencyTrend === "Increasing" &&
+    (args.customerStatus === "Active" || args.customerStatus === "New")
+  );
 }
 
 /**
@@ -168,7 +189,14 @@ export function valueFieldValues(
     lifetime_spend_percentile: spendPercentile.toFixed(2),
     order_frequency_percentile: frequencyPercentile.toFixed(2),
     customer_value_score: score.toFixed(2),
-    vip_classification: vipClassification({ vip, spendPercentile, frequencyPercentile }),
+    vip_classification: vipClassification({
+      vip,
+      spendPercentile,
+      frequencyPercentile,
+      score,
+      orderFrequencyTrend: metrics.orderFrequencyTrend,
+      customerStatus: metrics.customerStatus,
+    }),
     vip_status: vip ? "VIP" : "Not VIP",
   };
 }
