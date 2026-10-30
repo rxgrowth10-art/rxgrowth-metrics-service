@@ -21,6 +21,7 @@ import { WEBHOOK_DETAIL_FETCH_LIMIT, resolveOrderSummaries } from "../../src/ghl
 import type { GhlClient, GhlOrder } from "../../src/ghl/index.js";
 import { MemoryIdempotencyStore } from "../../src/idempotency/index.js";
 import { computeM06, contactOrderSummaries, viewContactOrders } from "../../src/metrics/index.js";
+import { M06_VALUE_FIELD_KEYS } from "../../src/metrics/value.js";
 import { M06_WRITTEN_KEYS, M10_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
 import { formatM06Values } from "../../src/writeback/format.js";
 import { metricsHash } from "../../src/writeback/hash.js";
@@ -510,7 +511,10 @@ describe("webhook summary pass", () => {
     expect(cold.summaries.map((summary) => summary?.orderId ?? null)).toEqual(["o1", "o2", null, "o4"]);
     expect(await cache.smembers(orderBackfillKey("loc_1"))).toEqual(["contact_1"]);
     const detailKeys = new Set<string>(M06_DETAIL_FIELD_KEYS);
-    expect(Object.keys(updates[0] ?? {})).toEqual(M06_WRITTEN_KEYS.filter((key) => !detailKeys.has(key)));
+    const valueKeys = new Set<string>(M06_VALUE_FIELD_KEYS);
+    expect(Object.keys(updates[0] ?? {})).toEqual(
+      M06_WRITTEN_KEYS.filter((key) => !detailKeys.has(key) && !valueKeys.has(key)),
+    );
     expect(updates[0]?.favorite_item).toBeUndefined();
     expect(updates[0]?.top_items).toBeUndefined();
     expect(updates[0]?.preferred_order_type).toBeUndefined();

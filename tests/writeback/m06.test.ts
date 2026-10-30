@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CustomFieldWrite, GhlClient, GhlContact } from "../../src/ghl/index.js";
+import { M06_VALUE_FIELD_KEYS, type ValueDistribution } from "../../src/metrics/value.js";
 import { M06_WRITTEN_KEYS, fieldByKey } from "../../src/schema/fields.js";
 import { coerceLastOrderType } from "../../src/writeback/format.js";
 import { metricsHash } from "../../src/writeback/hash.js";
@@ -58,6 +59,11 @@ function clientWith(orders = [order({ amount: 25.5, deliveryMethod: "shipping" }
 }
 
 const NOW = new Date("2026-01-11T12:00:00.000Z");
+const VALUE_KEYS = new Set<string>(M06_VALUE_FIELD_KEYS);
+
+function withoutValueKeys(): string[] {
+  return M06_WRITTEN_KEYS.filter((key) => !VALUE_KEYS.has(key));
+}
 
 describe("M06 writeback", () => {
   it("writes the M06 contract, including the new fields, and skips win-back fields", async () => {
@@ -71,7 +77,8 @@ describe("M06 writeback", () => {
     });
     expect(result.written).toBe(true);
     const fields = updates[0] ?? [];
-    expect(fields.map((field) => field.key)).toEqual([...M06_WRITTEN_KEYS]);
+    expect(fields.map((field) => field.key)).toEqual(withoutValueKeys());
+    expect(fields.some((field) => VALUE_KEYS.has(field.key))).toBe(false);
     expect(fields.some((field) => field.key.startsWith("winback_"))).toBe(false);
     const value = (key: string) => fields.find((field) => field.key === key)?.value;
     expect(value("total_orders")).toBe("1");
@@ -179,7 +186,7 @@ describe("M06 writeback", () => {
     });
     const fields = unmapped.updates[0] ?? [];
     expect(fields.map((field) => field.key)).toEqual(
-      M06_WRITTEN_KEYS.filter((key) => key !== "last_order_type" && key !== "preferred_order_type"),
+      withoutValueKeys().filter((key) => key !== "last_order_type" && key !== "preferred_order_type"),
     );
     expect(fields.some((field) => field.key === "last_order_type" || field.key === "preferred_order_type")).toBe(false);
     expect(fields.find((field) => field.key === "metrics_hash")?.value).toBe(
@@ -272,6 +279,83 @@ describe("M06 writeback", () => {
     expect(harness.updates[1]?.find((field) => field.key === "preferred_order_type")?.value).toBe("Delivery");
     expect(harness.updates[1]?.find((field) => field.key === "lifetime_value")?.value).toBe("40.00");
     expect(harness.updates).toHaveLength(2);
+  });
+
+  it("leaves percentile and VIP keys out until a distribution exists, then writes them", async () => {
+    const harness = clientWith([order({ amount: 25.5, deliveryMethod: "shipping", createdAt: "2026-01-01T12:00:00.000Z" })]);
+    const orders = [order({ amount: 25.5, deliveryMethod: "shipping", createdAt: "2026-01-01T12:00:00.000Z" })];
+    const first = await writeM06Metrics({
+      client: harness.client,
+      contactId: "contact_1",
+      orders,
+      timeZone: "UTC",
+      now: NOW,
+    });
+    const second = await writeM06Metrics({
+      client: harness.client,
+      contactId: "contact_1",
+      orders,
+      timeZone: "UTC",
+      now: NOW,
+    });
+    expect(first.written).toBe(true);
+    expect(second).toEqual({ written: false, hash: first.hash, reason: "unchanged" });
+    expect(harness.updates[0]?.some((field) => VALUE_KEYS.has(field.key))).toBe(false);
+
+    const distribution: ValueDistribution = {
+      spend: Array.from({ length: 10 }, () => 1),
+      orders: Array.from({ length: 10 }, () => 10),
+      scores: Array.from({ length: 10 }, () => 0),
+    };
+    const ranked = await writeM06Metrics({
+      client: harness.client,
+      contactId: "contact_1",
+      orders,
+      timeZone: "UTC",
+      now: NOW,
+      valueDistribution: distribution,
+    });
+    expect(ranked.written).toBe(true);
+    expect(ranked.hash).not.toBe(first.hash);
+    const fields = harness.updates[1] ?? [];
+    expect(fields.find((field) => field.key === "lifetime_spend_percentile")?.value).toBe("100.00");
+    expect(fields.find((field) => field.key === "order_frequency_percentile")?.value).toBe("0.00");
+    expect(fields.find((field) => field.key === "vip_status")?.value).toBe("VIP");
+    expect(fields.find((field) => field.key === "vip_classification")?.value).toBe("Spend Leader");
+    expect(fields.map((field) => field.key)).toEqual([...M06_WRITTEN_KEYS]);
+  });
+
+  it("writes blank percentiles for a contact with no orders and keeps blank VIP labels out of the update", async () => {
+    const harness = clientWith([]);
+    const distribution: ValueDistribution = { spend: [10, 20], orders: [1, 2], scores: [10, 40] };
+    const result = await writeM06Metrics({
+      client: harness.client,
+      contactId: "contact_1",
+      orders: [],
+      timeZone: "UTC",
+      now: NOW,
+      valueDistribution: distribution,
+    });
+    const fields = harness.updates[0] ?? [];
+    expect(fields.find((field) => field.key === "lifetime_spend_percentile")?.value).toBe("");
+    expect(fields.find((field) => field.key === "order_frequency_percentile")?.value).toBe("");
+    expect(fields.find((field) => field.key === "customer_value_score")?.value).toBe("");
+    expect(fields.some((field) => field.key === "vip_status" || field.key === "vip_classification")).toBe(false);
+    const hashed: Record<string, string> = Object.fromEntries(fields.map((field) => [field.key, field.value]));
+    for (const key of ["last_order_type", "preferred_order_type", "primary_order_source", "vip_classification", "vip_status"]) {
+      if (!(key in hashed)) hashed[key] = "";
+    }
+    expect(fields.find((field) => field.key === "metrics_hash")?.value).toBe(metricsHash(hashed));
+    const again = await writeM06Metrics({
+      client: harness.client,
+      contactId: "contact_1",
+      orders: [],
+      timeZone: "UTC",
+      now: NOW,
+      valueDistribution: distribution,
+    });
+    expect(again).toEqual({ written: false, hash: result.hash, reason: "unchanged" });
+    expect(harness.updates).toHaveLength(1);
   });
 
   it("hashes the written values independent of key order and ignores the timestamp", () => {

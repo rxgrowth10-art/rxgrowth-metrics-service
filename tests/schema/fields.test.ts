@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { M06_VALUE_FIELD_KEYS } from "../../src/metrics/value.js";
 import {
   FIELDS,
   M06_HASH_EXCLUDED_KEYS,
@@ -114,6 +115,34 @@ describe("generated field contract", () => {
       dataType: "NUMERICAL",
       testLabId: "z2Oh1r3BEouLFOFInXeX",
     });
+    expect(fieldByKey("lifetime_spend_percentile")).toMatchObject({
+      writer: "m06",
+      dataType: "NUMERICAL",
+      testLabId: "iyJaXbXaXKxMcehetSYH",
+    });
+    expect(fieldByKey("order_frequency_percentile")).toMatchObject({
+      writer: "m06",
+      dataType: "NUMERICAL",
+      testLabId: "TsIVWtWeJlyQftDTRKW9",
+    });
+    expect(fieldByKey("customer_value_score")).toMatchObject({
+      writer: "m06",
+      dataType: "NUMERICAL",
+      testLabId: "tccEoyv24W0qPmQ54PtE",
+    });
+    expect(fieldByKey("vip_status")).toMatchObject({
+      writer: "m06",
+      dataType: "SINGLE_OPTIONS",
+      testLabId: "gPQgOUXsYwfGgoD57opG",
+      picklistOptions: ["Not VIP", "VIP"],
+    });
+    expect(fieldByKey("vip_classification")).toMatchObject({
+      writer: "m06",
+      dataType: "SINGLE_OPTIONS",
+      testLabId: "S6sg8xrtXLvis3SS75PV",
+      picklistOptions: ["Spend Leader", "Frequency Leader", "High Value & High Frequency", "Emerging VIP", "Not VIP"],
+    });
+    expect(M06_VALUE_FIELD_KEYS.every((key) => (M06_WRITTEN_KEYS as readonly string[]).includes(key))).toBe(true);
     expect(M10_WRITTEN_KEYS).toEqual(["winback_eligibility", "winback_tier"]);
     expect(WORKFLOW_OWNED_KEYS).toEqual(["winback_cycle_status", "winback_cycle_started_at"]);
     expect(M06_HASH_EXCLUDED_KEYS).toEqual(["metrics_hash", "m06_intelligence_updated_at"]);
@@ -167,6 +196,11 @@ describe("generated field contract", () => {
       "purchase_consistency",
       "order_source_mix",
       "primary_order_source",
+      "lifetime_spend_percentile",
+      "order_frequency_percentile",
+      "customer_value_score",
+      "vip_classification",
+      "vip_status",
       "metrics_hash",
       "m06_intelligence_updated_at",
     ]);

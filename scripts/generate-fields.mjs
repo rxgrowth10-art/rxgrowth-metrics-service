@@ -42,6 +42,11 @@ const M06_WRITTEN_KEYS = [
   "purchase_consistency",
   "order_source_mix",
   "primary_order_source",
+  "lifetime_spend_percentile",
+  "order_frequency_percentile",
+  "customer_value_score",
+  "vip_classification",
+  "vip_status",
   "metrics_hash",
   "m06_intelligence_updated_at",
 ];

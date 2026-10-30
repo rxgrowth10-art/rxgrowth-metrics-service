@@ -18,5 +18,23 @@ export { recencyBucket } from "./recency.js";
 export { mean, median, round2 } from "./round.js";
 export { calculateTrend } from "./trends.js";
 export type { CustomerMetrics, MetricOrder, OrderDetailSummary, OrderLine, Trend } from "./types.js";
+export {
+  buildValueDistribution,
+  consistencyScore,
+  customerValueScore,
+  isVip,
+  M06_VALUE_FIELD_KEYS,
+  percentileRank,
+  recencyScore,
+  SPEND_WEIGHT,
+  FREQUENCY_WEIGHT,
+  RECENCY_WEIGHT,
+  CONSISTENCY_WEIGHT,
+  VIP_MIN_CUSTOMERS,
+  VIP_PERCENTILE,
+  valueFieldValues,
+  vipClassification,
+} from "./value.js";
+export type { ValueDistribution, ValueSample } from "./value.js";
 export { evaluateWinback, MIN_DAYS_SINCE_LAST_ORDER, MIN_OVERDUE_RATIO, MIN_QUALIFYING_ORDERS } from "./winback.js";
 export type { WinbackDecision, WinbackInput } from "./winback.js";
