@@ -88,6 +88,9 @@ function deps(options?: {
     async searchContactsPage() {
       return { contacts: [], searchAfter: null };
     },
+    async listCollections() {
+      return [];
+    },
     async addContactToWorkflow() {
       return undefined;
     },
@@ -184,6 +187,9 @@ describe("GHL webhook", () => {
     expect(await first.json()).toEqual({ accepted: true, written: true });
     expect(harness.updates[0]?.favorite_item).toBeUndefined();
     expect(harness.updates[0]?.top_items).toBeUndefined();
+    expect(harness.updates[0]?.favorite_category).toBeUndefined();
+    expect(harness.updates[0]?.top_categories).toBeUndefined();
+    expect(harness.updates[0]?.category_diversity).toBeUndefined();
     expect(harness.updates[0]?.preferred_order_type).toBeUndefined();
     expect(harness.updates[0]?.preferred_location).toBeUndefined();
     expect(harness.updates[0]?.order_source_mix).toBe("STENZ STORE: 4");
@@ -196,6 +202,9 @@ describe("GHL webhook", () => {
     const second = await handleGhlWebhook(post({ locationId: "loc1", contactId: "contact1" }), harness.deps);
     expect(await second.json()).toEqual({ accepted: true, written: true });
     expect(harness.updates[1]?.favorite_item).toBe("Koshari");
+    expect(harness.updates[1]?.favorite_category).toBe("");
+    expect(harness.updates[1]?.top_categories).toBe("");
+    expect(harness.updates[1]?.category_diversity).toBe("");
     expect(harness.updates[1]?.top_items).toBe("Koshari");
     expect(harness.updates[1]?.preferred_order_type).toBe("Delivery");
     expect(harness.updates[1]?.preferred_location).toBe("STENZ STORE");

@@ -8,6 +8,13 @@ import { buildFieldIdMap, readContactField, requireFieldId } from "./fields.js";
 import { formatM06Values } from "./format.js";
 import { metricsHash } from "./hash.js";
 
+/** Category keys. A failed collection-name refresh leaves these out even when order details are complete. */
+export const M06_CATEGORY_FIELD_KEYS = [
+  "favorite_category",
+  "top_categories",
+  "category_diversity",
+] as const;
+
 /**
  * Detail-derived keys. An incomplete summary pass leaves them out of the
  * contact update and out of the hash. A complete pass includes them in the
@@ -19,9 +26,11 @@ export const M06_DETAIL_FIELD_KEYS = [
   "top_items",
   "preferred_order_type",
   "preferred_location",
+  ...M06_CATEGORY_FIELD_KEYS,
 ] as const;
 
 const DETAIL_KEYS = new Set<string>(M06_DETAIL_FIELD_KEYS);
+const CATEGORY_KEYS = new Set<string>(M06_CATEGORY_FIELD_KEYS);
 const BLANK_OMIT = new Set(["last_order_type", "preferred_order_type", "primary_order_source"]);
 
 export interface WriteM06Result {
@@ -43,6 +52,13 @@ export async function writeM06Metrics(args: {
    * has the order lines in hand.
    */
   orderDetailsComplete?: boolean;
+  /** Collection id to name. Used only when category fields are included. */
+  collectionNames?: ReadonlyMap<string, string | null>;
+  /**
+   * False when the collection-name refresh failed. The three category keys
+   * stay off the contact and out of the hash. Defaults to true.
+   */
+  categoriesResolved?: boolean;
 }): Promise<WriteM06Result> {
   try {
     const ids = await resolveFieldIds(args);
@@ -71,11 +87,19 @@ async function writeWithIds(
     timeZone: string;
     now: Date;
     orderDetailsComplete?: boolean;
+    collectionNames?: ReadonlyMap<string, string | null>;
+    categoriesResolved?: boolean;
   },
   ids: ReadonlyMap<string, string>,
 ): Promise<WriteM06Result> {
-  const metrics = computeM06(args.orders, args.timeZone, args.now);
-  const values = hashedValues(formatM06Values(metrics), args.orderDetailsComplete !== false);
+  const metrics = computeM06(args.orders, args.timeZone, args.now, {
+    collectionNames: args.collectionNames,
+  });
+  const values = hashedValues(
+    formatM06Values(metrics),
+    args.orderDetailsComplete !== false,
+    args.categoriesResolved !== false,
+  );
   const hash = metricsHash(values);
   const contact = await args.client.getContact(args.contactId);
   if (readContactField(contact, "metrics_hash", ids) === hash) {
@@ -102,11 +126,17 @@ async function writeWithIds(
   return { written: true, hash, reason: "updated" };
 }
 
-function hashedValues(values: Record<string, string>, orderDetailsComplete: boolean): Record<string, string> {
-  if (orderDetailsComplete) return values;
+function hashedValues(
+  values: Record<string, string>,
+  orderDetailsComplete: boolean,
+  categoriesResolved: boolean,
+): Record<string, string> {
+  if (orderDetailsComplete && categoriesResolved) return values;
   const hashed: Record<string, string> = {};
   for (const [key, value] of Object.entries(values)) {
-    if (!DETAIL_KEYS.has(key)) hashed[key] = value;
+    if (!orderDetailsComplete && DETAIL_KEYS.has(key)) continue;
+    if (!categoriesResolved && CATEGORY_KEYS.has(key)) continue;
+    hashed[key] = value;
   }
   return hashed;
 }

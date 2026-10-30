@@ -47,6 +47,9 @@ function clientWith(orders = [order({ amount: 25.5, deliveryMethod: "shipping" }
     async searchContactsPage() {
       return { contacts: [], searchAfter: null };
     },
+    async listCollections() {
+      return [];
+    },
     async addContactToWorkflow() {
       return undefined;
     },
@@ -245,6 +248,9 @@ describe("M06 writeback", () => {
     expect(first.written).toBe(true);
     expect(second).toEqual({ written: false, hash: first.hash, reason: "unchanged" });
     expect(harness.updates[0]?.some((field) => field.key === "favorite_item")).toBe(false);
+    expect(harness.updates[0]?.some((field) => field.key === "favorite_category")).toBe(false);
+    expect(harness.updates[0]?.some((field) => field.key === "top_categories")).toBe(false);
+    expect(harness.updates[0]?.some((field) => field.key === "category_diversity")).toBe(false);
     expect(harness.updates[0]?.find((field) => field.key === "order_source_mix")?.value).toBe("STENZ STORE: 1");
     expect(harness.updates[0]?.find((field) => field.key === "primary_order_source")?.value).toBe("Online Store");
     expect(harness.updates[0]?.find((field) => field.key === "lifetime_value")?.value).toBe("40.00");
@@ -260,6 +266,9 @@ describe("M06 writeback", () => {
     expect(complete.written).toBe(true);
     expect(complete.hash).not.toBe(first.hash);
     expect(harness.updates[1]?.find((field) => field.key === "favorite_item")?.value).toBe("Koshari");
+    expect(harness.updates[1]?.find((field) => field.key === "favorite_category")?.value).toBe("");
+    expect(harness.updates[1]?.find((field) => field.key === "top_categories")?.value).toBe("");
+    expect(harness.updates[1]?.find((field) => field.key === "category_diversity")?.value).toBe("");
     expect(harness.updates[1]?.find((field) => field.key === "preferred_order_type")?.value).toBe("Delivery");
     expect(harness.updates[1]?.find((field) => field.key === "lifetime_value")?.value).toBe("40.00");
     expect(harness.updates).toHaveLength(2);

@@ -1,11 +1,22 @@
 import { GhlRequestError } from "./errors.js";
-import { parseContact, parseContactPage, parseCustomFields, parseOrderPage, parseOrderResource } from "./parse.js";
+import { parseCollections, parseContact, parseContactPage, parseCustomFields, parseOrderPage, parseOrderResource } from "./parse.js";
 import { type Clock, LocationRateLimiter, sharedLimiter, systemClock } from "./rate-limit.js";
-import type { CustomFieldWrite, GhlClient, GhlContact, GhlContactPage, GhlCustomField, GhlOrder, GhlOrderPage } from "./types.js";
+import type {
+  CustomFieldWrite,
+  GhlClient,
+  GhlCollection,
+  GhlContact,
+  GhlContactPage,
+  GhlCustomField,
+  GhlOrder,
+  GhlOrderPage,
+} from "./types.js";
 
 export const GHL_API_VERSION = "2021-07-28";
 export const GHL_API_BASE_URL = "https://services.leadconnectorhq.com";
 export const ORDER_PAGE_SIZE = 100;
+/** `GET /products/collections` accepts at most 100 ids per request. */
+export const COLLECTIONS_PAGE_LIMIT = 100;
 export const CONTACT_PAGE_SIZE = 100;
 
 export interface GhlClientOptions {
@@ -208,6 +219,28 @@ export function createGhlClient(options: GhlClientOptions): GhlClient {
         { query: { model: "contact" } },
       );
       return parseCustomFields(body);
+    },
+
+    async listCollections(collectionIds: readonly string[]): Promise<GhlCollection[]> {
+      const unique = [...new Set(collectionIds.filter((id) => id.length > 0))];
+      const found: GhlCollection[] = [];
+      for (let index = 0; index < unique.length; index += COLLECTIONS_PAGE_LIMIT) {
+        const chunk = unique.slice(index, index + COLLECTIONS_PAGE_LIMIT);
+        const body = await requestJson("GET", "/products/collections", {
+          query: {
+            altId: locationId,
+            altType: "location",
+            limit: COLLECTIONS_PAGE_LIMIT,
+            collectionIds: chunk.join(","),
+          },
+        });
+        const parsed = parseCollections(body);
+        if (!parsed) {
+          throw new GhlRequestError("GHL collections response was not a list", 200, "/products/collections");
+        }
+        found.push(...parsed);
+      }
+      return found;
     },
 
     async updateContact(contactId: string, fields: readonly CustomFieldWrite[]): Promise<void> {

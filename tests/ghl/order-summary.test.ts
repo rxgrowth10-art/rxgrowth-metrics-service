@@ -30,10 +30,10 @@ import { order } from "../helpers/orders.js";
 
 const NOW = new Date("2026-10-24T12:00:00.000Z");
 const FIXTURE_HASHES = {
-  list: "2fe33c1b609555c4f230ebe6fd50344d86a35a1e4686ca27243f5e3ca751f6c7",
-  shipping: "c80003e4fff0d11924cd9f195959fcaffc1c6416027216e3bc84044422ac95af",
-  pickup: "43779d006d76d59c4726931e31de78da09549f47d8ff18766bbd66d32233ceb1",
-  bare: "152aac0cf117b4041349ec593a36f3229acd080f0d09ce57df75d60495209519",
+  list: "ec55c01dba4bfafee79d5ed6d34e39fe45ac766544fa6227a48b04219afed6db",
+  shipping: "f058b2b15c2b410a03c78a959843e2a1212ba64a949549bd78f31dc9ba4fb9f0",
+  pickup: "7aa1af68016041fbc2a27e243eab70f07f8c9aa7892ff37e9f47ffef539f7575",
+  bare: "e7adcfba7a254045941b722d65ed6d4c6b70fb9c246b08c02fb94e174676dc0a",
 } as const;
 
 function load(name: string): unknown {
@@ -165,6 +165,9 @@ describe("order detail parsing", () => {
     expect(listValues.last_order_type).toBe("");
     expect(listValues.primary_order_source).toBe("Online Store");
     expect(listValues.purchase_consistency).toBe("Insufficient Data");
+    expect(listValues.favorite_category).toBe("");
+    expect(listValues.top_categories).toBe("");
+    expect(listValues.category_diversity).toBe("");
     expect(shipping ? formatM06Values(computeM06([shipping], "Africa/Cairo", NOW)).last_order_type : null).toBe(
       "Delivery",
     );
@@ -522,7 +525,9 @@ describe("webhook summary pass", () => {
     expect(M06_WRITTEN_KEYS).toContain("favorite_item");
     expect(M06_WRITTEN_KEYS).toContain("top_items");
     expect(M06_WRITTEN_KEYS).not.toContain("last_coupon_code");
-    expect(M06_WRITTEN_KEYS).not.toContain("favorite_category");
+    expect(M06_WRITTEN_KEYS).toContain("favorite_category");
+    expect(M06_WRITTEN_KEYS).toContain("top_categories");
+    expect(M06_WRITTEN_KEYS).toContain("category_diversity");
     const partial = formatM06Values(computeM06(cold.orders, "UTC", NOW));
     expect(partial.favorite_item).toBe("test product");
 
@@ -646,6 +651,9 @@ function summaryClient(
     },
     async searchContactsPage() {
       return { contacts: [], searchAfter: null };
+    },
+    async listCollections() {
+      return [];
     },
     async addContactToWorkflow() {
       return undefined;

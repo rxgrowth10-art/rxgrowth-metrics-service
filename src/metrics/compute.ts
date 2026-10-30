@@ -1,4 +1,5 @@
 import { addCalendarDays, businessDateString, calendarDayDifference } from "../time/business-date.js";
+import { rankCategories } from "./categories.js";
 import { rankChannels } from "./channels.js";
 import { purchaseConsistencyLabel } from "./consistency.js";
 import { frequencyBucket, trailing12MonthOrderCount } from "./frequency.js";
@@ -13,7 +14,17 @@ import { round2 } from "./round.js";
 import { calculateTrend } from "./trends.js";
 import type { CustomerMetrics, MetricOrder } from "./types.js";
 
-export function computeM06(orders: readonly MetricOrder[], timeZone: string, now: Date): CustomerMetrics {
+export interface ComputeM06Options {
+  /** Collection id to name. A missing id, or null, drops that collection. */
+  collectionNames?: ReadonlyMap<string, string | null>;
+}
+
+export function computeM06(
+  orders: readonly MetricOrder[],
+  timeZone: string,
+  now: Date,
+  options?: ComputeM06Options,
+): CustomerMetrics {
   const qualifying = orders.filter(isQualifyingOrder);
   const sorted = [...qualifying].sort(compareOrderTime);
   const count = sorted.length;
@@ -38,6 +49,7 @@ export function computeM06(orders: readonly MetricOrder[], timeZone: string, now
   const windows = today ? windowCounts(sorted, timeZone, today) : emptyWindows();
   const trailing = today ? trailing12MonthOrderCount(sorted, timeZone, today) : 0;
   const items = rankFavoriteItems(sorted);
+  const categories = rankCategories(sorted, options?.collectionNames ?? new Map());
   const channels = rankChannels(sorted);
 
   return {
@@ -82,6 +94,9 @@ export function computeM06(orders: readonly MetricOrder[], timeZone: string, now
     customerStatus: customerStatus(count, daysSinceLastOrder),
     favoriteItem: items.favoriteItem,
     topItems: items.topItems,
+    favoriteCategory: categories.favoriteCategory,
+    topCategories: categories.topCategories,
+    categoryDiversity: categories.categoryDiversity,
     preferredOrderType: channels.preferredOrderType,
     preferredLocation: channels.preferredLocation,
     purchaseConsistency: purchaseConsistencyLabel(intervals),

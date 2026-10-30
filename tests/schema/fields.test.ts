@@ -99,9 +99,21 @@ describe("generated field contract", () => {
       "Sporadic",
       "Insufficient Data",
     ]);
-    expect(fieldByKey("favorite_category")?.writer).toBe("external");
-    expect(fieldByKey("top_categories")?.writer).toBe("external");
-    expect(fieldByKey("category_diversity")?.writer).toBe("external");
+    expect(fieldByKey("favorite_category")).toMatchObject({
+      writer: "m06",
+      dataType: "TEXT",
+      testLabId: "176K49TuVhm0OO23cyvU",
+    });
+    expect(fieldByKey("top_categories")).toMatchObject({
+      writer: "m06",
+      dataType: "LARGE_TEXT",
+      testLabId: "FMQjJdxag0wDUO6rMFNX",
+    });
+    expect(fieldByKey("category_diversity")).toMatchObject({
+      writer: "m06",
+      dataType: "NUMERICAL",
+      testLabId: "z2Oh1r3BEouLFOFInXeX",
+    });
     expect(M10_WRITTEN_KEYS).toEqual(["winback_eligibility", "winback_tier"]);
     expect(WORKFLOW_OWNED_KEYS).toEqual(["winback_cycle_status", "winback_cycle_started_at"]);
     expect(M06_HASH_EXCLUDED_KEYS).toEqual(["metrics_hash", "m06_intelligence_updated_at"]);
@@ -113,7 +125,7 @@ describe("generated field contract", () => {
       fieldKey: "contact.favorite_category",
       dataType: "TEXT",
       testLabId: "176K49TuVhm0OO23cyvU",
-      writer: "external",
+      writer: "m06",
     });
     expect(field?.picklistOptions).toBeUndefined();
   });
@@ -147,6 +159,9 @@ describe("generated field contract", () => {
       "overdue_ratio",
       "favorite_item",
       "top_items",
+      "favorite_category",
+      "top_categories",
+      "category_diversity",
       "preferred_order_type",
       "preferred_location",
       "purchase_consistency",

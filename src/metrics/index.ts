@@ -1,3 +1,5 @@
+export { collectCollectionIds, rankCategories } from "./categories.js";
+export type { CategoryRanking } from "./categories.js";
 export { classifyOrderSource, orderCheckoutMethod, orderLocationName, rankChannels } from "./channels.js";
 export type { ChannelRanking } from "./channels.js";
 export { computeM06 } from "./compute.js";

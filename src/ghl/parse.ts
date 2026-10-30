@@ -1,7 +1,7 @@
 import { readBranchName, readSourceName } from "../metrics/location.js";
 import { round2 } from "../metrics/round.js";
 import type { OrderLine } from "../metrics/types.js";
-import type { GhlContact, GhlContactField, GhlCustomField, GhlOrder } from "./types.js";
+import type { GhlCollection, GhlContact, GhlContactField, GhlCustomField, GhlOrder } from "./types.js";
 
 export interface ParsedOrderPage {
   orders: GhlOrder[];
@@ -214,6 +214,25 @@ function readQty(value: unknown): number | null {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+/**
+ * `GET /products/collections` returns `{ data: [{ _id, name }] }`.
+ * A missing `data` array is null so the caller can fail open instead of
+ * caching every id as unnamed.
+ */
+export function parseCollections(body: unknown): GhlCollection[] | null {
+  const record = asRecord(body);
+  if (!record || !Array.isArray(record.data)) return null;
+  const collections: GhlCollection[] = [];
+  for (const entry of record.data) {
+    const item = asRecord(entry);
+    if (!item) continue;
+    const id = asString(item._id) ?? asString(item.id);
+    if (!id) continue;
+    collections.push({ id, name: asText(item.name) ?? asText(item.title) });
+  }
+  return collections;
 }
 
 function readCollectionIds(value: unknown): string[] {
